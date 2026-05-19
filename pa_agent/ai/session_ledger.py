@@ -1,12 +1,9 @@
-"""Session-level token and cost ledger."""
+"""Session-level token usage ledger (no pricing)."""
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 
 from pa_agent.ai.deepseek_client import AIUsage
-from pa_agent.ai.cost_estimator import estimate_cost, breakdown
-from pa_agent.config.settings import PricingTable
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +17,12 @@ except ImportError:
 
 
 class SessionTokenLedger(QObject):  # type: ignore[misc]
-    """Accumulates token usage and cost across all API calls in a session.
+    """Accumulates token usage across API calls in a session.
 
     Signals (Qt only)
     -----------------
     threshold_crossed(str, dict)
-        Emitted when context usage crosses 80% or 95%.
-        First arg: 'yellow' or 'red'. Second arg: breakdown dict.
+        Emitted when context usage crosses warn_pct or 95%.
     updated(dict)
         Emitted after every add() with the current totals dict.
     """
@@ -37,13 +33,11 @@ class SessionTokenLedger(QObject):  # type: ignore[misc]
 
     def __init__(
         self,
-        pricing: PricingTable,
         context_window: int = 1_000_000,
         warn_pct: float = 80.0,
         parent: "QObject | None" = None,
     ) -> None:
         super().__init__(parent)
-        self._pricing = pricing
         self._context_window = context_window
         self._warn_pct = warn_pct
         self._yellow_fired = False
@@ -52,7 +46,6 @@ class SessionTokenLedger(QObject):  # type: ignore[misc]
         self.total_input: int = 0
         self.total_cached_input: int = 0
         self.total_output: int = 0
-        self.total_cny: float = 0.0
 
     @property
     def context_used(self) -> int:
@@ -63,7 +56,6 @@ class SessionTokenLedger(QObject):  # type: ignore[misc]
         self.total_input += usage.prompt_tokens
         self.total_cached_input += usage.cached_prompt_tokens
         self.total_output += usage.completion_tokens
-        self.total_cny += estimate_cost(usage, self._pricing)
 
         pct = self.context_used / self._context_window * 100.0
 
@@ -87,7 +79,6 @@ class SessionTokenLedger(QObject):  # type: ignore[misc]
         self.total_input = 0
         self.total_cached_input = 0
         self.total_output = 0
-        self.total_cny = 0.0
         self._yellow_fired = False
         self._red_fired = False
 
@@ -101,5 +92,4 @@ class SessionTokenLedger(QObject):  # type: ignore[misc]
             "context_used": self.context_used,
             "context_window": self._context_window,
             "context_pct": round(pct, 2),
-            "total_cny": round(self.total_cny, 6),
         }

@@ -42,7 +42,6 @@ logger = logging.getLogger(__name__)
 
 def _build_empty_record(
     frame: KlineFrame,
-    htf_text: str,
     settings: Optional["Settings"],
 ) -> AnalysisRecord:
     """Build a partial AnalysisRecord with meta populated from the frame."""
@@ -83,7 +82,7 @@ def _build_empty_record(
     return AnalysisRecord(
         meta=meta,
         kline_data=kline_data,
-        htf_text=htf_text,
+        htf_text="",
         stage1_messages=[],
         stage1_response=None,
         stage1_diagnosis=None,
@@ -166,9 +165,15 @@ class TwoStageOrchestrator:
     def submit(
         self,
         frame: KlineFrame,
-        htf_text: str,
         cancel_token: CancelToken,
         on_event: Callable[[OrchestratorEvent], None],
+        *,
+        on_stage1_reasoning: Callable[[str], None] | None = None,
+        on_stage1_content: Callable[[str], None] | None = None,
+        on_stage2_reasoning: Callable[[str], None] | None = None,
+        on_stage2_content: Callable[[str], None] | None = None,
+        on_stage_prompt: Callable[[str, str, str], None] | None = None,
+        on_stage2_files: Callable[[list[str]], None] | None = None,
     ) -> AnalysisRecord:
         """Run the two-stage analysis pipeline and return an AnalysisRecord.
 
@@ -181,8 +186,6 @@ class TwoStageOrchestrator:
         ----------
         frame:
             Immutable KlineFrame snapshot to analyse.
-        htf_text:
-            Higher-timeframe context text entered by the user.
         cancel_token:
             Token checked before each stage and after each API call.
         on_event:
@@ -194,7 +197,7 @@ class TwoStageOrchestrator:
             Fully or partially populated record.
         """
         # ── Step 1: Build partial record ──────────────────────────────────────
-        record = _build_empty_record(frame, htf_text, self._settings)
+        record = _build_empty_record(frame, self._settings)
 
         # ── Step 2: Pre-Stage-1 cancel check ─────────────────────────────────
         if cancel_token.is_set():
@@ -207,11 +210,34 @@ class TwoStageOrchestrator:
         on_event(OrchestratorEvent.Stage1Started)
 
         # ── Step 4: Build Stage 1 messages ───────────────────────────────────
-        messages_s1 = self._assembler.build_stage1(frame, htf_text)
+        messages_s1 = self._assembler.build_stage1(frame)
 
         # ── Step 5: Call AI for Stage 1 ───────────────────────────────────────
+        print("\n" + "="*80)
+        print("【Stage 1 发送的完整 Prompt】")
+        print("="*80)
+        for msg in messages_s1:
+            role = msg.get("role", "?").upper()
+            content = msg.get("content", "")
+            print(f"\n--- [{role}] ---\n{content}")
+        print("="*80 + "\n")
+
+        # Notify conversation tab of the prompt being sent
+        if on_stage_prompt is not None:
+            s1_system = next((m.get("content", "") for m in messages_s1 if m.get("role") == "system"), "")
+            s1_user = next((m.get("content", "") for m in messages_s1 if m.get("role") == "user"), "")
+            on_stage_prompt("stage1", s1_system, s1_user)
+
+        _thinking, _effort = self._thinking_params()
         try:
-            reply_s1 = self._client.chat(messages_s1, cancel_token=cancel_token)
+            reply_s1 = self._client.stream_chat(
+                messages_s1,
+                on_reasoning_token=on_stage1_reasoning,
+                on_content_token=on_stage1_content,
+                cancel_token=cancel_token,
+                thinking=_thinking,
+                reasoning_effort=_effort,
+            )
         except Exception as exc:
             if self._is_network_error(exc):
                 logger.warning("Stage 1 network error: %s", exc)
@@ -246,6 +272,15 @@ class TwoStageOrchestrator:
             return record
 
         # ── Step 7: Validate Stage 1 ──────────────────────────────────────────
+        print("\n" + "="*80)
+        print("【Stage 1 AI 完整响应】")
+        print("="*80)
+        print(reply_s1.content)
+        if reply_s1.reasoning_content:
+            print(f"\n--- [思考过程] ---\n{reply_s1.reasoning_content}")
+        print(f"\n--- [Token 用量] prompt={reply_s1.usage.prompt_tokens} completion={reply_s1.usage.completion_tokens} latency={reply_s1.latency_ms:.0f}ms ---")
+        print("="*80 + "\n")
+
         result_s1 = self._validator.validate("stage1", reply_s1.content)
 
         if isinstance(result_s1, ValidationError):
@@ -316,6 +351,8 @@ class TwoStageOrchestrator:
 
         # ── Step 13: Stage 2 started ──────────────────────────────────────────
         on_event(OrchestratorEvent.Stage2Started)
+        if on_stage2_files is not None:
+            on_stage2_files(list(strategy_files))
 
         # ── Step 14: Build Stage 2 messages ───────────────────────────────────
         messages_s2 = self._assembler.build_stage2(
@@ -323,8 +360,30 @@ class TwoStageOrchestrator:
         )
 
         # ── Step 15: Call AI for Stage 2 ──────────────────────────────────────
+        print("\n" + "="*80)
+        print("【Stage 2 发送的完整 Prompt】")
+        print("="*80)
+        for msg in messages_s2:
+            role = msg.get("role", "?").upper()
+            content = msg.get("content", "")
+            print(f"\n--- [{role}] ---\n{content}")
+        print("="*80 + "\n")
+
+        # Notify conversation tab of the prompt being sent
+        if on_stage_prompt is not None:
+            s2_system = next((m.get("content", "") for m in messages_s2 if m.get("role") == "system"), "")
+            s2_user = next((m.get("content", "") for m in messages_s2 if m.get("role") == "user"), "")
+            on_stage_prompt("stage2", s2_system, s2_user)
+
         try:
-            reply_s2 = self._client.chat(messages_s2, cancel_token=cancel_token)
+            reply_s2 = self._client.stream_chat(
+                messages_s2,
+                on_reasoning_token=on_stage2_reasoning,
+                on_content_token=on_stage2_content,
+                cancel_token=cancel_token,
+                thinking=_thinking,
+                reasoning_effort=_effort,
+            )
         except Exception as exc:
             if self._is_network_error(exc):
                 logger.warning("Stage 2 network error: %s", exc)
@@ -379,6 +438,15 @@ class TwoStageOrchestrator:
             return record
 
         # ── Step 17: Validate Stage 2 ─────────────────────────────────────────
+        print("\n" + "="*80)
+        print("【Stage 2 AI 完整响应】")
+        print("="*80)
+        print(reply_s2.content)
+        if reply_s2.reasoning_content:
+            print(f"\n--- [思考过程] ---\n{reply_s2.reasoning_content}")
+        print(f"\n--- [Token 用量] prompt={reply_s2.usage.prompt_tokens} completion={reply_s2.usage.completion_tokens} latency={reply_s2.latency_ms:.0f}ms ---")
+        print("="*80 + "\n")
+
         result_s2 = self._validator.validate("stage2", reply_s2.content)
 
         if isinstance(result_s2, ValidationError):
@@ -464,6 +532,13 @@ class TwoStageOrchestrator:
         return record
 
     # ── Internal helpers ──────────────────────────────────────────────────────
+
+    def _thinking_params(self) -> tuple[bool, str]:
+        """Return (thinking, reasoning_effort) from settings defaults."""
+        if self._settings is None:
+            return True, "max"
+        p = self._settings.provider
+        return p.thinking, p.reasoning_effort
 
     @staticmethod
     def _is_network_error(exc: Exception) -> bool:

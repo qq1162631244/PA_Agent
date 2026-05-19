@@ -1,42 +1,37 @@
 """Pydantic settings models for PA Agent."""
 from __future__ import annotations
 from typing import Literal
-from pydantic import BaseModel, Field
-
-
-class PricingTable(BaseModel):
-    """Per-million-token pricing in CNY (DeepSeek V4 Pro defaults)."""
-    input_cache_hit: float = 0.1      # ¥/M tokens (cache hit)
-    input_cache_miss: float = 12.0    # ¥/M tokens (cache miss)
-    output: float = 24.0              # ¥/M tokens (output)
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AIProviderSettings(BaseModel):
     """AI provider connection and behaviour settings."""
+    model_config = ConfigDict(extra="ignore")
+
     model: str = "deepseek-v4-pro"
     base_url: str = "https://api.deepseek.com"
-    # api_key is the in-memory plaintext field; never serialised directly.
     api_key: str = ""
-    # api_key_encrypted is the on-disk ciphertext field.
     api_key_encrypted: str = ""
     thinking: bool = True
     reasoning_effort: Literal["low", "medium", "high", "max"] = "max"
     context_window: int = 1_000_000
-    pricing: PricingTable = Field(default_factory=PricingTable)
 
 
 class GeneralSettings(BaseModel):
     """UI and data-feed general settings."""
+    model_config = ConfigDict(extra="ignore")
+
     default_bar_count: int = 200
     refresh_interval_ms: int = 1000
-    cost_warning_threshold_pct: float = 80.0
+    context_warning_threshold_pct: float = 80.0
     last_symbol: str = "XAUUSD"
     last_timeframe: str = "1h"
-    last_htf_text: str = ""
 
 
 class Settings(BaseModel):
     """Root settings object persisted to config/settings.json."""
+    model_config = ConfigDict(extra="ignore")
+
     provider: AIProviderSettings = Field(default_factory=AIProviderSettings)
     general: GeneralSettings = Field(default_factory=GeneralSettings)
 
@@ -71,8 +66,17 @@ def load_settings(path: Path | None = None) -> "Settings":
         logger.warning("settings.json unreadable (%s); using defaults", exc)
         return Settings()
 
-    # Decrypt api_key back into memory field
-    encrypted = raw.get("provider", {}).get("api_key_encrypted", "")
+    # Migrate legacy field names
+    general = raw.get("general", {})
+    if "cost_warning_threshold_pct" in general and "context_warning_threshold_pct" not in general:
+        general["context_warning_threshold_pct"] = general.pop("cost_warning_threshold_pct")
+    general.pop("last_htf_text", None)
+    raw["general"] = general
+    provider = raw.get("provider", {})
+    provider.pop("pricing", None)
+    raw["provider"] = provider
+
+    encrypted = provider.get("api_key_encrypted", "")
     if encrypted:
         try:
             raw.setdefault("provider", {})["api_key"] = SecretStore.decrypt(encrypted)
@@ -96,10 +100,9 @@ def save_settings(settings: "Settings", path: Path | None = None) -> None:
 
     data = settings.model_dump()
 
-    # Encrypt and strip plaintext key
     plaintext = data.get("provider", {}).get("api_key", "")
     if plaintext:
         data["provider"]["api_key_encrypted"] = SecretStore.encrypt(plaintext)
-    data["provider"].pop("api_key", None)  # never write plaintext
+    data["provider"].pop("api_key", None)
 
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

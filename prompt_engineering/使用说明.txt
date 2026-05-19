@@ -122,7 +122,7 @@ User Prompt 内容:
     "cycle_position": "spike|micro_channel|tight_channel|normal_channel|broad_channel|trending_tr|trading_range|extreme_tr|unknown",
     "alternative_cycle_position": "第二可能的周期状态（边界模糊时必填，否则null）",
     "direction": "bullish|bearish|neutral",
-    "diagnosis_confidence": "high|medium|low",
+    "diagnosis_confidence": 75,
     "spike_stage": "active|ending|transitioning|null（仅spike/micro_channel时必填）",
     "market_phase": "stable|transitioning",
     "transition_risk": "high|medium|low|null（仅transitioning时必填）",

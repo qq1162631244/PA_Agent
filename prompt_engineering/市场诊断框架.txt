@@ -1993,7 +1993,7 @@ K线收盘弱势 → 收紧止损或减仓
   "cycle_position": "spike/micro_channel/tight_channel/normal_channel/broad_channel/trending_tr/trading_range/extreme_tr/unknown",
   "alternative_cycle_position": "第二可能的周期状态（边界模糊时必填，稳定状态下可为null）",
   "direction": "bullish/bearish/neutral",
-  "diagnosis_confidence": "high/medium/low（指对cycle_position判断的确定性，非入场信号强度）",
+  "diagnosis_confidence": 75,
   "spike_stage": "active/ending/transitioning（仅当cycle_position=spike或micro_channel时必填；active=进行中，ending=特征减弱但未完全结束，transitioning=已结束正在转通道/区间）",
   "market_phase": "stable/transitioning（stable=当前状态稳定持续中，transitioning=状态正在发生转换，如通道→区间、尖峰→通道等）",
   "transition_risk": "low/medium/high（状态转换期的误判风险等级，仅当market_phase=transitioning时必填）",
@@ -2006,7 +2006,9 @@ K线收盘弱势 → 收紧止损或减仓
 }
 ```
 
-⚠️ 诊断不清时（diagnosis_confidence=low 且 key_signals为空），输出 `"action": "wait"`，不进入阶段二。
+diagnosis_confidence：必填整数 0–100（禁止 high/medium/low 字符串），表示对 cycle_position 判断的把握程度，非入场信号强度。
+
+⚠️ 诊断不清时（diagnosis_confidence 低于 40 且 key_signals 为空），阶段二应倾向不下单。
 
 ⚠️ spike_stage路由规则（解决尖峰结束后策略文件加载问题）：
 - spike_stage="active" → 阶段二加载「极速上涨/下跌策略」+「极速上涨/下跌识别」
@@ -2034,4 +2036,4 @@ K线收盘弱势 → 收紧止损或减仓
 ⚠️ cycle_position="unknown" 处理规则（数据不足时的兜底）：
 - 当K线数量<20或数据质量不足以做出有效诊断时，AI应输出 cycle_position="unknown"
 - 程序路由：unknown → 不加载任何策略文件，阶段二输出 action="wait"
-- diagnosis_confidence 此时强制设为 "low"
+- diagnosis_confidence 此时不得超过 30（整数 0–100）

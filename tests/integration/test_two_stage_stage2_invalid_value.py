@@ -55,7 +55,6 @@ def test_stage2_invalid_confidence(frame, exc_counter, pending_writer, assembler
 
     record = orchestrator.submit(
         frame=frame,
-        htf_text="",
         cancel_token=cancel_token,
         on_event=events.append,
     )

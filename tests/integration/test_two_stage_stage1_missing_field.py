@@ -51,7 +51,6 @@ def test_stage1_missing_cycle_position(frame, exc_counter, pending_writer, assem
 
     record = orchestrator.submit(
         frame=frame,
-        htf_text="",
         cancel_token=cancel_token,
         on_event=events.append,
     )

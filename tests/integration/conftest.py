@@ -15,7 +15,7 @@ from pa_agent.orchestrator.exception_counter import ExceptionCounter
 VALID_STAGE1 = {
     "cycle_position": "normal_channel",
     "direction": "bullish",
-    "diagnosis_confidence": "high",
+    "diagnosis_confidence": 75,
     "market_phase": "stable",
     "detected_patterns": [],
     "key_signals": ["signal1"],

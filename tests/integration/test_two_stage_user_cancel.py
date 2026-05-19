@@ -44,7 +44,6 @@ def test_cancel_before_stage2(frame, exc_counter, pending_writer, assembler, exp
 
     orchestrator.submit(
         frame=frame,
-        htf_text="",
         cancel_token=cancel_token,
         on_event=events.append,
     )

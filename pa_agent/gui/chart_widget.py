@@ -41,7 +41,7 @@ class ChartWidget(pg.PlotWidget):
         super().__init__(parent=parent)
 
         # Configure plot appearance
-        self.setBackground("k")
+        self.setBackground("#0d1117")
         self.showGrid(x=False, y=True, alpha=0.3)
         self.getPlotItem().setLabel("left", "Price")
 

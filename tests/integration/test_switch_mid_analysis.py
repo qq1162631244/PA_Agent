@@ -31,7 +31,7 @@ from pa_agent.util.threading import CancelToken, OrchestratorEvent
 VALID_STAGE1 = {
     "cycle_position": "normal_channel",
     "direction": "bullish",
-    "diagnosis_confidence": "high",
+    "diagnosis_confidence": 75,
     "market_phase": "stable",
     "detected_patterns": [],
     "key_signals": ["signal1"],
@@ -242,7 +242,6 @@ class TestSwitchMidAnalysis:
         worker = _AnalysisWorker(
             orchestrator=orchestrator,
             frame=_make_frame(),
-            htf_text="test",
             cancel_token=cancel_token,
             parent=None,
         )
@@ -328,7 +327,6 @@ class TestSwitchMidAnalysis:
         worker = _AnalysisWorker(
             orchestrator=orchestrator,
             frame=_make_frame(),
-            htf_text="test",
             cancel_token=cancel_token,
             parent=None,
         )
@@ -406,7 +404,6 @@ class TestSwitchMidAnalysis:
         worker = _AnalysisWorker(
             orchestrator=orchestrator,
             frame=_make_frame(),
-            htf_text="test",
             cancel_token=cancel_token,
             parent=None,
         )
@@ -528,7 +525,6 @@ class TestSwitchMidAnalysis:
         worker = _AnalysisWorker(
             orchestrator=orchestrator,
             frame=_make_frame(),
-            htf_text="test",
             cancel_token=cancel_token,
             parent=None,
         )

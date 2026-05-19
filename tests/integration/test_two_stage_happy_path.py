@@ -38,7 +38,6 @@ def test_happy_path(frame, exc_counter, pending_writer, assembler, exp_reader):
 
     record = orchestrator.submit(
         frame=frame,
-        htf_text="bullish HTF",
         cancel_token=cancel_token,
         on_event=events.append,
     )

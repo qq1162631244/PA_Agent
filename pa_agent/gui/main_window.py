@@ -9,16 +9,13 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMenuBar,
-    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QSpinBox,
     QSplitter,
     QStatusBar,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -45,24 +42,35 @@ class _AnalysisWorker(QThread):
         failure / cancellation).
     status_update(str):
         Emitted with human-readable progress text.
+    reasoning_token(str, str):
+        Emitted with (stage, token_chunk) for each reasoning token streamed.
+        stage is "stage1" or "stage2".
+    content_token(str, str):
+        Emitted with (stage, token_chunk) for each content token streamed.
+        stage is "stage1" or "stage2".
+    stage_prompt_ready(str, str, str):
+        Emitted with (stage, system_prompt, user_prompt) just before each
+        API call, so the conversation tab can show what was sent.
     """
 
     finished = pyqtSignal(dict)
     record_ready = pyqtSignal(object)   # emits the full AnalysisRecord
     status_update = pyqtSignal(str)
+    reasoning_token = pyqtSignal(str, str)   # (stage, chunk)
+    content_token = pyqtSignal(str, str)     # (stage, chunk)
+    stage_prompt_ready = pyqtSignal(str, str, str)  # (stage, system, user)
+    stage2_files_ready = pyqtSignal(list)  # strategy .txt filenames for stage 2
 
     def __init__(
         self,
         orchestrator: Any,
         frame: Any,
-        htf_text: str,
         cancel_token: Any,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._orchestrator = orchestrator
         self._frame = frame
-        self._htf_text = htf_text
         self._cancel_token = cancel_token
 
     def run(self) -> None:
@@ -83,12 +91,35 @@ class _AnalysisWorker(QThread):
             label = _EVENT_LABELS.get(event, str(event))
             self.status_update.emit(label)
 
+        def on_stage1_reasoning(chunk: str) -> None:
+            self.reasoning_token.emit("stage1", chunk)
+
+        def on_stage1_content(chunk: str) -> None:
+            self.content_token.emit("stage1", chunk)
+
+        def on_stage2_reasoning(chunk: str) -> None:
+            self.reasoning_token.emit("stage2", chunk)
+
+        def on_stage2_content(chunk: str) -> None:
+            self.content_token.emit("stage2", chunk)
+
+        def on_stage_prompt(stage: str, system: str, user: str) -> None:
+            self.stage_prompt_ready.emit(stage, system, user)
+
+        def on_stage2_files(files: list[str]) -> None:
+            self.stage2_files_ready.emit(files)
+
         try:
             record = self._orchestrator.submit(
                 self._frame,
-                self._htf_text,
                 self._cancel_token,
                 on_event,
+                on_stage1_reasoning=on_stage1_reasoning,
+                on_stage1_content=on_stage1_content,
+                on_stage2_reasoning=on_stage2_reasoning,
+                on_stage2_content=on_stage2_content,
+                on_stage_prompt=on_stage_prompt,
+                on_stage2_files=on_stage2_files,
             )
             decision = record.stage2_decision or {}
         except Exception as exc:  # noqa: BLE001
@@ -104,19 +135,12 @@ class _AnalysisWorker(QThread):
 # ── MainWindow ────────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
-    """Top-level window with a three-tab layout and a status bar.
-
-    Tabs
-    ----
-    0 — 主页    (home / chart + analysis)
-    1 — 对话页  (conversation / free-chat)
-    2 — 调试页  (debug / raw AI output)
-    """
+    """Top-level workbench: chart + AI sidebar (analysis / raw / decision)."""
 
     def __init__(self, ctx: AppContext, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("PA Agent")
-        self.resize(1280, 800)
+        self.setWindowTitle("PA Agent — Trading Terminal")
+        self.resize(1440, 900)
         self._ctx = ctx
         self._worker: _AnalysisWorker | None = None
         self._cancel_token: Any = None
@@ -129,34 +153,31 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._connect_event_bus()
         self._start_refresh_loop()
+        self._update_ai_mode_label()
 
     # ── UI construction ───────────────────────────────────────────────────────
 
     def _setup_ui(self) -> None:
-        # ── Tab widget ────────────────────────────────────────────────────────
-        self._tabs = QTabWidget()
-        self._home_tab = self._build_home_tab()
+        from pa_agent.gui.ai_sidebar import AISidebar
 
-        # ── Tab 2: Conversation ───────────────────────────────────────────────
-        from pa_agent.gui.conversation_widget import ConversationWidget
-        self._conversation_widget = ConversationWidget()
-        self._chat_tab = self._conversation_widget
-
-        # ── Tab 3: Debug ──────────────────────────────────────────────────────
-        from pa_agent.gui.debug_widget import DebugWidget
         _api_key = ""
         _exc_counter = getattr(self._ctx, "exc_counter", None)
         _settings = getattr(self._ctx, "settings", None)
         if _settings is not None:
             _api_key = getattr(_settings.provider, "api_key", "") or ""
-        self._debug_widget = DebugWidget(api_key=_api_key, exc_counter=_exc_counter)
-        self._debug_tab = self._debug_widget
 
-        self._tabs.addTab(self._home_tab, "主页")
-        self._tabs.addTab(self._chat_tab, "对话页")
-        self._tabs.addTab(self._debug_tab, "调试页")
+        self._ai_sidebar = AISidebar(
+            api_key=_api_key,
+            exc_counter=_exc_counter,
+            settings=_settings,
+        )
+        self._stream_panel = self._ai_sidebar.stream
+        self._debug_widget = self._ai_sidebar.debug
+        self._prompt_files_panel = self._ai_sidebar.prompt_files
+        self._decision_panel = self._ai_sidebar.decision
 
-        self.setCentralWidget(self._tabs)
+        self._central = self._build_workbench()
+        self.setCentralWidget(self._central)
 
         # ── Status bar ────────────────────────────────────────────────────────
         self._status_bar = QStatusBar()
@@ -171,10 +192,9 @@ class MainWindow(QMainWindow):
         open_settings_action.triggered.connect(self._open_settings_dialog)
         settings_menu.addAction(open_settings_action)
 
-    def _build_home_tab(self) -> QWidget:
-        """Build and return the home tab widget."""
+    def _build_workbench(self) -> QWidget:
+        """Build chart + AI sidebar workbench."""
         from pa_agent.gui.chart_widget import ChartWidget
-        from pa_agent.gui.decision_panel import DecisionPanel
 
         tab = QWidget()
         outer_layout = QVBoxLayout(tab)
@@ -219,99 +239,52 @@ class MainWindow(QMainWindow):
 
         ctrl_layout.addStretch()
 
-        # Submit button
         self._submit_btn = QPushButton("提交分析")
+        self._submit_btn.setObjectName("primaryButton")
         self._submit_btn.setMinimumWidth(100)
         self._submit_btn.clicked.connect(self._on_submit_analysis)
         ctrl_layout.addWidget(self._submit_btn)
 
+        self._decision_badge = QLabel("")
+        self._decision_badge.setObjectName("mutedLabel")
+        ctrl_layout.addWidget(self._decision_badge)
+
+        self._ai_mode_label = QLabel("")
+        self._ai_mode_label.setObjectName("mutedLabel")
+        ctrl_layout.addWidget(self._ai_mode_label)
+
         outer_layout.addLayout(ctrl_layout)
 
-        # ── AI config bar (Base URL / Model / API Key) ────────────────────────
-        ai_layout = QHBoxLayout()
-        ai_layout.setSpacing(6)
-
-        ai_layout.addWidget(QLabel("Base URL:"))
-        self._base_url_edit = QLineEdit()
-        self._base_url_edit.setPlaceholderText("https://api.deepseek.com")
-        self._base_url_edit.setMinimumWidth(200)
-        ai_layout.addWidget(self._base_url_edit)
-
-        ai_layout.addWidget(QLabel("模型:"))
-        self._model_edit = QLineEdit()
-        self._model_edit.setPlaceholderText("deepseek-v4-pro")
-        self._model_edit.setMinimumWidth(130)
-        ai_layout.addWidget(self._model_edit)
-
-        ai_layout.addWidget(QLabel("API Key:"))
-        self._api_key_inline_edit = QLineEdit()
-        self._api_key_inline_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self._api_key_inline_edit.setPlaceholderText("输入 API Key…")
-        self._api_key_inline_edit.setMinimumWidth(180)
-        ai_layout.addWidget(self._api_key_inline_edit)
-
-        self._ai_save_btn = QPushButton("保存")
-        self._ai_save_btn.setFixedWidth(52)
-        self._ai_save_btn.clicked.connect(self._on_save_ai_config)
-        ai_layout.addWidget(self._ai_save_btn)
-
-        outer_layout.addLayout(ai_layout)
-
-        # Populate AI config fields from settings
-        _ai_settings = getattr(self._ctx, "settings", None)
-        if _ai_settings is not None:
-            _p = _ai_settings.provider
-            self._base_url_edit.setText(getattr(_p, "base_url", "") or "")
-            self._model_edit.setText(getattr(_p, "model", "") or "")
-            self._api_key_inline_edit.setText(getattr(_p, "api_key", "") or "")
-
-        # ── HTF status label (auto-fetched, read-only) ────────────────────────
-        htf_row = QHBoxLayout()
-        htf_row.addWidget(QLabel("HTF 周期:"))
-        self._htf_tf_label = QLabel("—")
-        self._htf_tf_label.setStyleSheet("color: #888888;")
-        htf_row.addWidget(self._htf_tf_label)
-        htf_row.addStretch()
-        self._htf_status_label = QLabel("（提交时自动获取）")
-        self._htf_status_label.setStyleSheet("color: #888888; font-size: 11px;")
-        htf_row.addWidget(self._htf_status_label)
-
-        # ── Last refresh elapsed label ────────────────────────────────────────
-        self._last_refresh_ts: float = 0.0   # monotonic time of last chart update
+        status_row = QHBoxLayout()
+        status_row.addStretch()
+        self._last_refresh_ts: float = 0.0
         self._refresh_elapsed_label = QLabel("距上次刷新: —")
-        self._refresh_elapsed_label.setStyleSheet("color: #888888; font-size: 11px;")
-        htf_row.addWidget(self._refresh_elapsed_label)
+        self._refresh_elapsed_label.setObjectName("mutedLabel")
+        status_row.addWidget(self._refresh_elapsed_label)
 
-        # 1-second ticker to update the elapsed label
         from PyQt6.QtCore import QTimer as _QTimer
         self._elapsed_ticker = _QTimer(tab)
         self._elapsed_ticker.setInterval(1000)
         self._elapsed_ticker.timeout.connect(self._update_refresh_elapsed)
         self._elapsed_ticker.start()
 
-        outer_layout.addLayout(htf_row)
-        # Set initial HTF label based on restored timeframe
-        _htf_init = self._HTF_MAP.get(_last_tf, "—")
-        self._htf_tf_label.setText(_htf_init)
+        outer_layout.addLayout(status_row)
 
-        # ── Chart + Decision splitter ─────────────────────────────────────────
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        workbench = QSplitter(Qt.Orientation.Horizontal)
 
         self._chart_widget = ChartWidget()
         self._chart_widget.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        splitter.addWidget(self._chart_widget)
+        workbench.addWidget(self._chart_widget)
 
-        self._decision_panel = DecisionPanel()
-        self._decision_panel.setMinimumWidth(220)
-        self._decision_panel.setMaximumWidth(360)
-        splitter.addWidget(self._decision_panel)
+        self._ai_sidebar.setMinimumWidth(400)
+        workbench.addWidget(self._ai_sidebar)
 
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 1)
+        workbench.setStretchFactor(0, 3)
+        workbench.setStretchFactor(1, 2)
 
-        outer_layout.addWidget(splitter, stretch=1)
+        outer_layout.addWidget(workbench, stretch=1)
 
         # Initial button state
         self._update_submit_button_state()
@@ -384,6 +357,10 @@ class MainWindow(QMainWindow):
     def _on_status_update(self, text: str) -> None:
         """Update the status bar with subscription / analysis / data-delay text."""
         self._status_bar.showMessage(text)
+        if self._analysis_in_progress:
+            panel = getattr(self, "_stream_panel", None)
+            if panel is not None:
+                panel.on_analysis_progress(text)
 
     def _update_refresh_elapsed(self) -> None:
         """Update the 'distance from last refresh' label every second."""
@@ -402,26 +379,31 @@ class MainWindow(QMainWindow):
             label.setText(f"距上次刷新: {m}m{s:02d}s")
         # Turn red if stale (> 10 seconds without update)
         if elapsed > 10:
-            label.setStyleSheet("color: #dc3232; font-size: 11px;")
+            label.setStyleSheet("color: #f85149; font-size: 11px;")
         else:
-            label.setStyleSheet("color: #888888; font-size: 11px;")
+            label.setObjectName("mutedLabel")
+            label.setStyleSheet("")
 
     def _on_data_frame(self, frame: Any) -> None:
         """Forward a new KlineFrame to the chart widget (throttled by 30 Hz timer)."""
         self._chart_widget.set_frame(frame)
 
     def _on_refresh_frame_ready(self, bars: Any) -> None:
-        """Handle frame_ready signal from RefreshLoop."""
+        """Handle frame_ready signal from RefreshLoop.
+
+        Builds a KlineFrame directly from the bars returned by latest_snapshot()
+        rather than reading back from the buffer, which avoids ordering issues
+        caused by repeated appendleft() calls corrupting the buffer's deque.
+        """
         if not bars:
             return
 
-        buffer = getattr(self._ctx, "buffer", None)
-        if buffer is None:
-            return
-
         try:
-            from pa_agent.data.snapshot import take_snapshot
+            from pa_agent.data.snapshot import compute_indicators
+            from pa_agent.data.base import KlineBar, KlineFrame
+            from pa_agent.util.timefmt import now_local_ms
             import time as _time
+
             settings = getattr(self._ctx, "settings", None)
             n_bars = 200
             if settings is not None:
@@ -430,7 +412,37 @@ class MainWindow(QMainWindow):
             symbol = self._symbol_combo.currentText().strip()
             timeframe = self._tf_combo.currentText()
 
-            frame = take_snapshot(buffer, n_bars, symbol, timeframe)
+            # Use the bars directly from latest_snapshot (already newest-first,
+            # bars[0] is the forming bar).  Re-assign seq numbers to guarantee
+            # the bijection invariant expected by the rest of the system.
+            raw = bars[:n_bars]
+            if len(raw) < n_bars:
+                # Not enough bars yet — skip this tick silently
+                return
+
+            rebased: list[KlineBar] = [
+                KlineBar(
+                    seq=i + 1,
+                    ts_open=b.ts_open,
+                    open=b.open,
+                    high=b.high,
+                    low=b.low,
+                    close=b.close,
+                    volume=b.volume,
+                    closed=(i != 0),
+                )
+                for i, b in enumerate(raw)
+            ]
+
+            indicators = compute_indicators(rebased)
+            frame = KlineFrame(
+                symbol=symbol,
+                timeframe=timeframe,
+                bars=tuple(rebased),
+                indicators=indicators,
+                snapshot_ts_local_ms=now_local_ms(),
+            )
+
             self._chart_widget.set_frame(frame)
 
             # Record the time of this successful chart update
@@ -530,25 +542,14 @@ class MainWindow(QMainWindow):
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("Failed to persist symbol/tf to settings: %s", exc)
 
-            # Update HTF label to reflect new timeframe
-            htf = self._HTF_MAP.get(new_tf, "—")
-            self._htf_tf_label.setText(htf)
-            self._htf_status_label.setText("（提交时自动获取）")
-
         finally:
             self._switching = False
 
     def _disable_chat_input(self) -> None:
-        """Disable the Tab2 free-chat input widget if it exists."""
-        # The ConversationWidget is in Tab2; try to find and disable its input.
-        chat_tab = self._tabs.widget(1)
-        if chat_tab is None:
-            return
-        # Look for QPlainTextEdit children (the input box)
-        from PyQt6.QtWidgets import QPlainTextEdit as _PTE
-        for child in chat_tab.findChildren(_PTE):
-            child.setEnabled(False)
-            break
+        """Disable free-chat input in the AI stream window."""
+        panel = getattr(self, "_stream_panel", None)
+        if panel is not None:
+            panel.set_input_enabled(False)
 
     def _on_submit_analysis(self) -> None:
         """Handle the '提交分析' button click."""
@@ -566,9 +567,6 @@ class MainWindow(QMainWindow):
         symbol = self._symbol_combo.currentText()
         timeframe = self._tf_combo.currentText()
         bar_count = self._bar_count_spin.value()
-
-        # Auto-fetch HTF K-line data
-        htf_text = self._fetch_htf_text(symbol, timeframe)
 
         # Try to build a KlineFrame snapshot
         frame = self._take_snapshot(symbol, timeframe, bar_count)
@@ -591,29 +589,57 @@ class MainWindow(QMainWindow):
         self._worker = _AnalysisWorker(
             orchestrator=orchestrator,
             frame=frame,
-            htf_text=htf_text,
             cancel_token=self._cancel_token,
-            parent=None,  # No parent so it can be moved/managed independently
+            parent=None,
         )
         self._worker.finished.connect(self._on_analysis_finished)
         self._worker.record_ready.connect(self._on_record_ready)
         self._worker.status_update.connect(self._on_status_update)
         self._worker.finished.connect(lambda _: self._on_worker_done())
 
+        panel = getattr(self, "_stream_panel", None)
+        if panel is not None:
+            self._worker.stage_prompt_ready.connect(panel.on_stage_prompt_ready)
+            self._worker.reasoning_token.connect(panel.on_reasoning_token)
+            self._worker.content_token.connect(panel.on_content_token)
+
         self._analysis_in_progress = True
         self._update_submit_button_state()
         self._status_bar.showMessage("分析中…")
+        self._decision_badge.setText("分析中…")
+        self._ai_sidebar.focus_stream()
 
-        # Clear previous results from conversation and debug tabs
-        conv = getattr(self, "_conversation_widget", None)
-        if conv is not None:
-            conv.clear()
-            conv.on_analysis_started()
+        panel = getattr(self, "_stream_panel", None)
+        if panel is not None:
+            panel.clear()
+            panel.on_analysis_started()
         debug = getattr(self, "_debug_widget", None)
         if debug is not None:
             debug.clear()
 
+        pf = getattr(self, "_prompt_files_panel", None)
+        if pf is not None:
+            from pa_agent.ai.prompt_assembler import stage1_prompt_txt_files
+
+            pf.clear()
+            pf.set_stage1_files(stage1_prompt_txt_files())
+            pf.set_extras(stage1_builtin=True)
+
+        self._worker.stage2_files_ready.connect(
+            self._on_stage2_files_ready,
+            Qt.ConnectionType.UniqueConnection,
+        )
         self._worker.start()
+
+    def _on_stage2_files_ready(self, strategy_files: list) -> None:
+        """Update 调试 tab when Stage 2 strategy .txt list is known."""
+        pf = getattr(self, "_prompt_files_panel", None)
+        if pf is None:
+            return
+        from pa_agent.ai.prompt_assembler import stage2_prompt_txt_files
+
+        pf.set_stage2_files(stage2_prompt_txt_files(strategy_files))
+        pf.set_extras(stage1_builtin=True, stage2_builtin=True)
 
     def _on_analysis_finished(self, decision: dict) -> None:
         """Called on the main thread when the AI worker completes.
@@ -623,13 +649,17 @@ class MainWindow(QMainWindow):
         the inner ``decision`` sub-dict, so we extract it here.
         """
         if decision:
-            # The stage2 JSON has a nested "decision" key; extract it so that
-            # ChartWidget and DecisionPanel receive the flat decision dict.
             inner = decision.get("decision", decision)
             self._chart_widget.set_decision(inner)
-            self._decision_panel.set_decision(inner)
+            self._decision_panel.set_decision(
+                inner,
+                diagnosis_summary=decision.get("diagnosis_summary"),
+            )
+            order = inner.get("order_type", "—")
+            self._decision_badge.setText(f"决策: {order}")
         else:
             self._decision_panel.clear()
+            self._decision_badge.setText("")
 
     def _on_record_ready(self, record: Any) -> None:
         """Push the full AnalysisRecord to the conversation and debug tabs."""
@@ -679,10 +709,33 @@ class MainWindow(QMainWindow):
                     "validation_info": _json.dumps(exc_info, ensure_ascii=False, indent=2),
                 })
 
-        # ── Conversation tab: show stage results ──────────────────────────────
-        conv = getattr(self, "_conversation_widget", None)
-        if conv is not None:
-            # Stage 1 result
+        pf = getattr(self, "_prompt_files_panel", None)
+        if pf is not None:
+            from pa_agent.ai.prompt_assembler import (
+                stage1_prompt_txt_files,
+                stage2_prompt_txt_files,
+            )
+
+            strategy = getattr(record, "strategy_files_used", None) or []
+            experience = getattr(record, "experience_loaded", None) or []
+            pf.set_latest_run(
+                stage1_prompt_txt_files(),
+                stage2_prompt_txt_files(strategy),
+                experience_count=len(experience),
+            )
+
+        s1_diag = getattr(record, "stage1_diagnosis", None) or {}
+        s2_full = getattr(record, "stage2_decision", None)
+        if s2_full:
+            inner = s2_full.get("decision", s2_full)
+            self._decision_panel.set_decision(
+                inner,
+                diagnosis_summary=s2_full.get("diagnosis_summary"),
+                stage1_diagnosis=s1_diag if isinstance(s1_diag, dict) else None,
+            )
+
+        panel = getattr(self, "_stream_panel", None)
+        if panel is not None:
             s1_diag = getattr(record, "stage1_diagnosis", None)
             if s1_diag:
                 s1_content = _json.dumps(s1_diag, ensure_ascii=False, indent=2)
@@ -693,9 +746,8 @@ class MainWindow(QMainWindow):
                     if choices:
                         msg = choices[0].get("message", {})
                         s1_reasoning = msg.get("reasoning_content", "") or ""
-                conv.show_stage_result("阶段一：市场诊断", s1_content, s1_reasoning)
+                panel.show_stage_result("阶段一：市场诊断", s1_content, s1_reasoning)
 
-            # Stage 2 result
             s2_decision = getattr(record, "stage2_decision", None)
             if s2_decision:
                 s2_content = _json.dumps(s2_decision, ensure_ascii=False, indent=2)
@@ -706,8 +758,55 @@ class MainWindow(QMainWindow):
                     if choices:
                         msg = choices[0].get("message", {})
                         s2_reasoning = msg.get("reasoning_content", "") or ""
-                conv.show_stage_result("阶段二：交易决策", s2_content, s2_reasoning)
-                conv.on_record_saved()  # enable free-chat input
+                panel.show_stage_result("阶段二：交易决策", s2_content, s2_reasoning)
+
+            # ── Create FreeChatSession and wire to stream panel ───────────────
+            try:
+                from pa_agent.orchestrator.free_chat import FreeChatSession
+                from pa_agent.util.threading import CancelToken as _CancelToken
+
+                client = getattr(self._ctx, "client", None)
+                assembler = getattr(self._ctx, "assembler", None)
+                pending_writer = getattr(self._ctx, "pending_writer", None)
+                ledger = getattr(self._ctx, "ledger", None)
+                settings = getattr(self._ctx, "settings", None)
+
+                if all(x is not None for x in [client, assembler, pending_writer, ledger]):
+                    session = FreeChatSession(
+                        base_record=record,
+                        client=client,
+                        assembler=assembler,
+                        pending_writer=pending_writer,
+                        ledger=ledger,
+                        settings=settings,
+                    )
+                    chat_cancel_token = _CancelToken()
+                    panel.set_session(session, chat_cancel_token)
+                    logger.info("FreeChatSession created for record %s", getattr(record.meta, "timestamp_local_iso", "?"))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to create FreeChatSession: %s", exc)
+
+            panel.on_record_saved()
+
+            usage_total = getattr(record, "usage_total", {}) or {}
+            if usage_total:
+                settings = getattr(self._ctx, "settings", None)
+                context_window = 1_000_000
+                if settings is not None:
+                    context_window = getattr(settings.provider, "context_window", 1_000_000) or 1_000_000
+
+                prompt_tokens = usage_total.get("prompt_tokens", 0)
+                cached_tokens = usage_total.get("cached_prompt_tokens", 0)
+                completion_tokens = usage_total.get("completion_tokens", 0)
+                total_tokens = usage_total.get("total_tokens", 0) or (prompt_tokens + completion_tokens)
+
+                panel.update_token_display({
+                    "context_used": total_tokens,
+                    "context_window": context_window,
+                    "total_input": prompt_tokens,
+                    "total_cached_input": cached_tokens,
+                    "total_output": completion_tokens,
+                })
 
     def _on_worker_done(self) -> None:
         """Reset in-progress flag and re-enable the submit button."""
@@ -715,41 +814,6 @@ class MainWindow(QMainWindow):
         self._worker = None
         self._update_submit_button_state()
         self._status_bar.showMessage("分析完成")
-
-    def _on_save_ai_config(self) -> None:
-        """Save Base URL / Model / API Key from the inline config bar to settings."""
-        settings = getattr(self._ctx, "settings", None)
-        if settings is None:
-            self._status_bar.showMessage("设置对象未初始化")
-            return
-
-        base_url = self._base_url_edit.text().strip()
-        model = self._model_edit.text().strip()
-        api_key = self._api_key_inline_edit.text()
-
-        if base_url:
-            settings.provider.base_url = base_url
-        if model:
-            settings.provider.model = model
-        if api_key:
-            settings.provider.api_key = api_key
-
-        try:
-            from pa_agent.config.settings import save_settings
-            save_settings(settings)
-            self._status_bar.showMessage("AI 配置已保存")
-            logger.info("AI config saved: base_url=%s model=%s key=***", base_url, model)
-        except Exception as exc:  # noqa: BLE001
-            self._status_bar.showMessage(f"保存失败: {exc}")
-            logger.error("Failed to save AI config: %s", exc)
-
-        # Also update the DeepSeekClient in ctx so the next analysis uses the new key
-        client = getattr(self._ctx, "client", None)
-        if client is not None:
-            try:
-                client._settings = settings.provider  # type: ignore[attr-defined]
-            except Exception:  # noqa: BLE001
-                pass
 
     def _open_settings_dialog(self) -> None:
         """Open the SettingsDialog; import lazily to avoid circular imports."""
@@ -761,8 +825,31 @@ class MainWindow(QMainWindow):
             settings = Settings()
 
         dlg = SettingsDialog(settings, parent=self)
-        dlg.exec()
-        self._ctx.settings = settings
+        if dlg.exec():
+            self._ctx.settings = settings
+            client = getattr(self._ctx, "client", None)
+            if client is not None:
+                try:
+                    client._settings = settings.provider  # type: ignore[attr-defined]
+                except Exception:  # noqa: BLE001
+                    pass
+            if settings is not None:
+                key = getattr(settings.provider, "api_key", "") or ""
+                self._debug_widget._api_key = key
+                self._ai_sidebar.bind_settings(settings)
+            self._update_ai_mode_label()
+
+    def _update_ai_mode_label(self) -> None:
+        """Show current thinking / reasoning_effort / model in the toolbar."""
+        settings = getattr(self._ctx, "settings", None)
+        if settings is None:
+            self._ai_mode_label.setText("")
+            return
+        p = settings.provider
+        thinking = "开" if p.thinking else "关"
+        self._ai_mode_label.setText(
+            f"思考: {thinking} · effort={p.reasoning_effort} · {p.model}"
+        )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -792,89 +879,22 @@ class MainWindow(QMainWindow):
         return 0
 
     def _take_snapshot(self, symbol: str, timeframe: str, bar_count: int) -> Any:
-        """Attempt to take a KlineFrame snapshot from the buffer.
-
-        Returns None if the buffer is not ready.
-        """
+        """Snapshot for analysis: *bar_count* closed bars (newest forming bar excluded)."""
         try:
-            buffer = getattr(self._ctx, "buffer", None)
-            if buffer is None:
-                return None
-            from pa_agent.data.snapshot import take_snapshot
+            from pa_agent.data.snapshot import build_analysis_frame
 
-            return take_snapshot(buffer, bar_count, symbol, timeframe)
-        except ValueError:
-            return None
+            data_source = getattr(self._ctx, "data_source", None)
+            if data_source is None or not getattr(data_source, "_connected", False):
+                return None
+
+            bars_raw = data_source.latest_snapshot(bar_count + 5)
+            if not bars_raw:
+                return None
+
+            return build_analysis_frame(bars_raw, bar_count, symbol, timeframe)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Snapshot failed: %s", exc)
             return None
-
-    # ── HTF auto-fetch ────────────────────────────────────────────────────────
-
-    # Map current timeframe → higher timeframe to use as context
-    _HTF_MAP: dict[str, str] = {
-        "1m":  "15m",
-        "3m":  "1h",
-        "5m":  "1h",
-        "15m": "4h",
-        "30m": "4h",
-        "45m": "4h",
-        "1h":  "4h",
-        "2h":  "1d",
-        "3h":  "1d",
-        "4h":  "1d",
-        "1d":  "1w",
-        "1w":  "1M",
-    }
-
-    def _fetch_htf_text(self, symbol: str, timeframe: str) -> str:
-        """Fetch the higher-timeframe K-line data and format it as text for the AI.
-
-        Returns an empty string on any error (analysis still proceeds).
-        """
-        htf = self._HTF_MAP.get(timeframe, "")
-        if not htf:
-            return ""
-
-        # Update the UI label
-        self._htf_tf_label.setText(htf)
-        self._htf_status_label.setText("获取中…")
-
-        data_source = getattr(self._ctx, "data_source", None)
-        if data_source is None or not getattr(data_source, "_connected", False):
-            self._htf_status_label.setText("（数据源未连接）")
-            return ""
-
-        try:
-            # Temporarily subscribe to HTF, fetch 50 bars, then restore
-            original_symbol = getattr(data_source, "_symbol", symbol)
-            original_tf = getattr(data_source, "_timeframe", timeframe)
-
-            data_source.subscribe(symbol, htf)
-            bars = data_source.latest_snapshot(50)
-            data_source.subscribe(original_symbol, original_tf)
-
-            if not bars:
-                self._htf_status_label.setText("（无数据）")
-                return ""
-
-            # Format as a compact text table for the AI
-            lines = [f"## 高时间框架 K 线数据 ({symbol} {htf}，最近 {len(bars)} 根，序号1=最新)"]
-            lines.append("序号 | 开盘 | 最高 | 最低 | 收盘 | 成交量")
-            lines.append("-----|------|------|------|------|------")
-            for bar in bars[:30]:  # cap at 30 to keep prompt size reasonable
-                lines.append(
-                    f"#{bar.seq} | {bar.open:.2f} | {bar.high:.2f} | "
-                    f"{bar.low:.2f} | {bar.close:.2f} | {bar.volume:.0f}"
-                )
-
-            self._htf_status_label.setText(f"✓ 已获取 {len(bars)} 根 {htf} K线")
-            return "\n".join(lines)
-
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("HTF fetch failed (%s %s): %s", symbol, htf, exc)
-            self._htf_status_label.setText(f"（获取失败: {exc}）")
-            return ""
 
     def _build_orchestrator(self) -> Any:
         """Build a TwoStageOrchestrator from ctx components, or return None."""

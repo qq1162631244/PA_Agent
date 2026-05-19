@@ -36,7 +36,6 @@ def _make_data(context_used: int, context_window: int = 1_000_000) -> dict:
         "total_input": context_used,
         "total_cached_input": 0,
         "total_output": 0,
-        "total_cny": 0.0,
     }
 
 

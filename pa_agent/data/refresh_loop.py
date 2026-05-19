@@ -72,11 +72,16 @@ class RefreshLoop(QThread):  # type: ignore[misc]
                 self._consecutive_failures = 0
                 failure_start = None
 
-                # Update buffer: first bar is forming, rest are closed
+                # Only update the forming bar in the buffer.
+                # Closed bars are managed by the buffer's own append logic;
+                # re-appending all bars every tick would corrupt the ordering
+                # because appendleft() inserts at the front each time.
                 if bars:
                     self._buffer.update_forming(bars[0])
-                    for bar in bars[1:]:
-                        self._buffer.append(bar)
+                    # Promote newly-closed bars: if the previous forming bar's
+                    # ts_open no longer matches bars[0], it has closed — append it.
+                    if len(bars) > 1:
+                        self._buffer.append(bars[1])
 
                 if _QT_AVAILABLE:
                     self.frame_ready.emit(bars)

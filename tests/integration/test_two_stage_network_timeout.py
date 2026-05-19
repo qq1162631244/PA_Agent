@@ -36,7 +36,6 @@ def test_network_timeout_stage1(frame, exc_counter, pending_writer, assembler, e
 
     orchestrator.submit(
         frame=frame,
-        htf_text="",
         cancel_token=cancel_token,
         on_event=events.append,
     )

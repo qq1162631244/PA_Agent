@@ -112,7 +112,10 @@ class AppContext:
         )
 
         # ── Session ledger ────────────────────────────────────────────────────
-        ledger = SessionTokenLedger(pricing=settings.provider.pricing)
+        ledger = SessionTokenLedger(
+            context_window=settings.provider.context_window,
+            warn_pct=settings.general.context_warning_threshold_pct,
+        )
 
         return cls(
             settings=settings,

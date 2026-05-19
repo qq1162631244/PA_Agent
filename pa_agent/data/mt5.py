@@ -182,11 +182,11 @@ class MT5Source(DataSource):
                 f"{error}"
             )
 
-        # rates is a numpy structured array sorted newest-first
-        # (copy_rates_from_pos position 0 = current forming bar = newest)
-        # Iterate directly: rates[0] → seq=1 (newest/forming), rates[n-1] → seq=n (oldest)
+        # copy_rates_from_pos returns oldest-first (ascending time order).
+        # rates[0] is the OLDEST bar, rates[-1] is the NEWEST (forming) bar.
+        # We need newest-first, so reverse the array before building KlineBar list.
         bars: list[KlineBar] = []
-        for i, rate in enumerate(rates):
+        for i, rate in enumerate(reversed(rates)):
             # rate fields: time, open, high, low, close, tick_volume, spread, real_volume
             ts_ms = int(rate["time"]) * 1000  # MT5 gives UTC seconds
             try:
@@ -204,7 +204,7 @@ class MT5Source(DataSource):
                 low=float(rate["low"]),
                 close=float(rate["close"]),
                 volume=vol,
-                closed=(i != 0),  # rates[0] is the forming (unclosed) bar
+                closed=(i != 0),  # i=0 is the newest (forming) bar
             ))
             if len(bars) >= n:
                 break

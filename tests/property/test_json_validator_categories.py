@@ -13,7 +13,7 @@ def _valid_stage1() -> dict:
     return {
         "cycle_position": "normal_channel",
         "direction": "bullish",
-        "diagnosis_confidence": "high",
+        "diagnosis_confidence": 75,
         "market_phase": "stable",
         "detected_patterns": [],
         "key_signals": ["HH+HL structure"],
@@ -56,6 +56,24 @@ def test_valid_stage1_returns_ok():
     """
     result = validator.validate("stage1", json.dumps(_valid_stage1()))
     assert isinstance(result, Ok), f"Expected Ok, got {result}"
+
+
+def test_stage1_diagnosis_confidence_score_accepted():
+    """0–100 score (integer) for diagnosis_confidence must pass schema validation."""
+    obj = _valid_stage1()
+    obj["diagnosis_confidence"] = 70
+    result = validator.validate("stage1", json.dumps(obj))
+    assert isinstance(result, Ok), f"Expected Ok, got {result}"
+
+
+def test_stage1_diagnosis_confidence_legacy_string_rejected():
+    """high/medium/low strings are no longer accepted."""
+    obj = _valid_stage1()
+    obj["diagnosis_confidence"] = "high"
+    result = validator.validate("stage1", json.dumps(obj))
+    assert isinstance(result, ValidationError)
+    assert result.category == "c"
+    assert "diagnosis_confidence" in result.invalid_fields
 
 
 def test_valid_stage2_no_order_returns_ok():

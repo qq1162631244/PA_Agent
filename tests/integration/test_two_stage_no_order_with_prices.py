@@ -75,7 +75,6 @@ def test_no_order_with_entry_price(frame, exc_counter, pending_writer, assembler
 
     record = orchestrator.submit(
         frame=frame,
-        htf_text="",
         cancel_token=cancel_token,
         on_event=events.append,
     )

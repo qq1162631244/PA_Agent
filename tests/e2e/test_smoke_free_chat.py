@@ -21,7 +21,7 @@ from pa_agent.ai.router import route_strategy_files
 VALID_STAGE1 = {
     "cycle_position": "normal_channel",
     "direction": "bullish",
-    "diagnosis_confidence": "high",
+    "diagnosis_confidence": 75,
     "market_phase": "stable",
     "detected_patterns": [],
     "key_signals": ["signal1"],
@@ -135,7 +135,6 @@ def test_free_chat_after_analysis(qtbot, tmp_path):
     from pa_agent.gui.main_window import MainWindow
     from pa_agent.orchestrator.free_chat import FreeChatSession
     from pa_agent.ai.session_ledger import SessionTokenLedger
-    from pa_agent.config.settings import PricingTable
     from pa_agent.util.threading import CancelToken
 
     ctx, pending_writer, exc_counter = _make_ctx(tmp_path)
@@ -160,8 +159,7 @@ def test_free_chat_after_analysis(qtbot, tmp_path):
     completed_record = pending_writer.save_full.call_args[0][0]
 
     # Build a SessionTokenLedger for the free-chat session
-    pricing = PricingTable()
-    ledger = SessionTokenLedger(pricing=pricing)
+    ledger = SessionTokenLedger()
 
     # Create a FreeChatSession wired to the window's client
     session = FreeChatSession(

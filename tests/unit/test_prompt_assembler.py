@@ -57,7 +57,7 @@ def assembler(tmp_path: Path) -> PromptAssembler:
 def test_stage1_system_prompt_order(assembler: PromptAssembler):
     """Stage 1 system prompt must contain the 3 always-on files in order."""
     frame = _make_frame()
-    messages = assembler.build_stage1(frame, htf_text="1h bullish")
+    messages = assembler.build_stage1(frame)
     system = messages[0]["content"]
     pos_persona = system.find("提示词大纲_人设与思维方式")
     pos_diag = system.find("市场诊断框架")
@@ -68,22 +68,14 @@ def test_stage1_system_prompt_order(assembler: PromptAssembler):
 
 
 def test_stage1_user_prompt_contains_required_fields(assembler: PromptAssembler):
-    """Stage 1 user prompt must contain symbol, timeframe, bar count, HTF text."""
+    """Stage 1 user prompt must contain symbol, timeframe, bar count."""
     frame = _make_frame()
-    messages = assembler.build_stage1(frame, htf_text="大周期看涨")
+    messages = assembler.build_stage1(frame)
     user = messages[1]["content"]
     assert "XAUUSD" in user
     assert "1h" in user
-    assert "大周期看涨" in user
-    assert "序号" in user  # K-line table header
-
-
-def test_stage1_empty_htf_still_has_placeholder(assembler: PromptAssembler):
-    """Empty htf_text still produces a placeholder section."""
-    frame = _make_frame()
-    messages = assembler.build_stage1(frame, htf_text="")
-    user = messages[1]["content"]
-    assert "更高时间框架背景" in user
+    assert "序号" in user
+    assert "更高时间框架" not in user
 
 
 def test_stage2_system_prompt_order(assembler: PromptAssembler):
@@ -115,7 +107,7 @@ def test_stage2_user_prompt_contains_stage1_json(assembler: PromptAssembler):
 def test_stage1_output_reminder_present(assembler: PromptAssembler):
     """Stage 1 system prompt must contain the output format reminder."""
     frame = _make_frame()
-    messages = assembler.build_stage1(frame, htf_text="")
+    messages = assembler.build_stage1(frame)
     system = messages[0]["content"]
     assert "cycle_position" in system
     assert "diagnosis_confidence" in system
@@ -165,7 +157,7 @@ def test_kline_table_contains_nan_as_na(assembler: PromptAssembler):
         symbol="XAUUSD", timeframe="1h", bars=bars,
         indicators=indicators, snapshot_ts_local_ms=1_700_000_000_000,
     )
-    messages = assembler.build_stage1(frame, htf_text="")
+    messages = assembler.build_stage1(frame)
     user = messages[1]["content"]
     assert "N/A" in user
 
@@ -173,7 +165,7 @@ def test_kline_table_contains_nan_as_na(assembler: PromptAssembler):
 def test_stage1_message_roles(assembler: PromptAssembler):
     """build_stage1 must return exactly [system, user] messages."""
     frame = _make_frame()
-    messages = assembler.build_stage1(frame, htf_text="test")
+    messages = assembler.build_stage1(frame)
     assert len(messages) == 2
     assert messages[0]["role"] == "system"
     assert messages[1]["role"] == "user"

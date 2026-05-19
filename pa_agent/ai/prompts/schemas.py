@@ -27,7 +27,7 @@ STAGE1_SCHEMA: dict = {
         },
         "alternative_cycle_position": {"type": ["string", "null"]},
         "direction": {"type": "string", "enum": ["bullish", "bearish", "neutral"]},
-        "diagnosis_confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "diagnosis_confidence": {"type": "integer", "minimum": 0, "maximum": 100},
         "spike_stage": {
             "type": ["string", "null"],
             "enum": ["active", "ending", "transitioning", None],
@@ -89,7 +89,6 @@ _DECISION_BASE: dict = {
         "key_factors",
         "watch_points",
         "risk_assessment",
-        "invalidation_condition",
     ],
     "properties": {
         "order_direction": {"type": ["string", "null"]},
@@ -101,11 +100,11 @@ _DECISION_BASE: dict = {
         "take_profit_price": {"type": ["number", "null"]},
         "stop_loss_price": {"type": ["number", "null"]},
         "reasoning": {"type": "string"},
-        "confidence": {"type": ["integer", "number"], "minimum": 0, "maximum": 100},
+        "confidence": {"type": ["integer", "number"]},
         "key_factors": {"type": "array", "items": {"type": "string"}},
         "watch_points": {"type": "array", "items": {"type": "string"}},
         "risk_assessment": {"type": "string"},
-        "invalidation_condition": {"type": "string"},
+        "invalidation_condition": {"type": ["string", "null"]},
     },
     "allOf": [
         # 不下单 → all price fields and direction must be null

@@ -1,0 +1,53 @@
+"""Right-hand sidebar: live stream, raw I/O, prompt files debug, and decision."""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional
+
+from PyQt6.QtWidgets import QTabWidget, QVBoxLayout, QWidget
+
+from pa_agent.gui.ai_stream_window import AIStreamPanel
+from pa_agent.gui.debug_widget import DebugWidget
+from pa_agent.gui.decision_panel import DecisionPanel
+from pa_agent.gui.prompt_files_panel import PromptFilesPanel
+
+if TYPE_CHECKING:
+    from pa_agent.config.settings import Settings
+    from pa_agent.orchestrator.exception_counter import ExceptionCounter
+
+
+class AISidebar(QWidget):
+    """Workbench sidebar tabs: 实时 | 原始 | 调试 | 决策."""
+
+    def __init__(
+        self,
+        api_key: str = "",
+        exc_counter: Optional["ExceptionCounter"] = None,
+        settings: Optional["Settings"] = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._tabs = QTabWidget()
+
+        self.stream = AIStreamPanel()
+        self.debug = DebugWidget(api_key=api_key, exc_counter=exc_counter)
+        self.prompt_files = PromptFilesPanel()
+        self.decision = DecisionPanel()
+
+        self._tabs.addTab(self.stream, "实时")
+        self._tabs.addTab(self.debug, "原始")
+        self._tabs.addTab(self.prompt_files, "调试")
+        self._tabs.addTab(self.decision, "决策")
+
+        if settings is not None:
+            self.stream.bind_settings(settings)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._tabs)
+
+    def focus_stream(self) -> None:
+        """Switch to the live AI output tab (index 0)."""
+        self._tabs.setCurrentIndex(0)
+
+    def bind_settings(self, settings: Optional["Settings"]) -> None:
+        self.stream.bind_settings(settings)

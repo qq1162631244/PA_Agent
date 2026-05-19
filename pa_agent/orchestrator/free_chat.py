@@ -8,7 +8,7 @@ Design reference: design.md §B.17
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 if TYPE_CHECKING:
     from pa_agent.ai.deepseek_client import DeepSeekClient
@@ -110,7 +110,13 @@ class FreeChatSession:
         """The record basename used for the JSONL sidecar file."""
         return self._record_id
 
-    def send(self, user_text: str, cancel_token: CancelToken) -> AIReply:
+    def send(
+        self,
+        user_text: str,
+        cancel_token: CancelToken,
+        on_reasoning_token: "Callable[[str], None] | None" = None,
+        on_content_token: "Callable[[str], None] | None" = None,
+    ) -> AIReply:
         """Send *user_text* to the AI and return the reply.
 
         Steps
@@ -210,10 +216,12 @@ class FreeChatSession:
             self._pending_writer.append_followup(self._record_id, cancelled_turn)
             raise CancelledError("FreeChatSession.send cancelled before API call")
 
-        # ── 4. Call the API ───────────────────────────────────────────────────
+        # ── 4. Call the API (streaming) ───────────────────────────────────────
         try:
-            reply = self._client.chat(
+            reply = self._client.stream_chat(
                 history_for_api,
+                on_reasoning_token=on_reasoning_token,
+                on_content_token=on_content_token,
                 cancel_token=cancel_token,
                 reasoning_effort=reasoning_effort,
             )

@@ -18,6 +18,9 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(argv)
     app.setApplicationName("PA Agent")
 
+    from pa_agent.gui.theme import apply_theme
+    apply_theme(app)
+
     logger.info("PA Agent starting up")
 
     # Bootstrap all components (settings, data source, AI client, etc.)

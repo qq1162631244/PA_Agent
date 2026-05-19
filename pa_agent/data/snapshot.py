@@ -80,3 +80,41 @@ def compute_indicators(bars: list[KlineBar]) -> IndicatorBundle:
     atr14 = tuple(reversed(atr14_asc))
 
     return IndicatorBundle(ema20=ema20, atr14=atr14)
+
+
+def build_analysis_frame(
+    bars_raw: list[KlineBar],
+    n: int,
+    symbol: str,
+    timeframe: str,
+) -> KlineFrame | None:
+    """Build a snapshot for AI analysis: *n* newest **closed** bars only.
+
+    *bars_raw* is newest-first; ``bars_raw[0]`` is the forming (unclosed) bar
+    and is discarded. Returns None if fewer than ``n + 1`` bars are available.
+    """
+    if len(bars_raw) < n + 1:
+        return None
+
+    closed_raw = bars_raw[1 : n + 1]
+    rebased: list[KlineBar] = [
+        KlineBar(
+            seq=i + 1,
+            ts_open=b.ts_open,
+            open=b.open,
+            high=b.high,
+            low=b.low,
+            close=b.close,
+            volume=b.volume,
+            closed=True,
+        )
+        for i, b in enumerate(closed_raw)
+    ]
+    indicators = compute_indicators(rebased)
+    return KlineFrame(
+        symbol=symbol,
+        timeframe=timeframe,
+        bars=tuple(rebased),
+        indicators=indicators,
+        snapshot_ts_local_ms=now_local_ms(),
+    )

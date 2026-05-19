@@ -47,7 +47,6 @@ def test_stage1_plain_text(frame, exc_counter, pending_writer, assembler, exp_re
 
     orchestrator.submit(
         frame=frame,
-        htf_text="",
         cancel_token=cancel_token,
         on_event=events.append,
     )

@@ -22,7 +22,7 @@ _STAGE1_OUTPUT_REMINDER = """
   "cycle_position": "spike|micro_channel|tight_channel|normal_channel|broad_channel|trending_tr|trading_range|extreme_tr|unknown",
   "alternative_cycle_position": null,
   "direction": "bullish|bearish|neutral",
-  "diagnosis_confidence": "high|medium|low",
+  "diagnosis_confidence": 75,
   "spike_stage": null,
   "market_phase": "stable|transitioning",
   "transition_risk": null,
@@ -34,6 +34,9 @@ _STAGE1_OUTPUT_REMINDER = """
   "risk_warning": ""
 }
 ```
+
+diagnosis_confidence 必须为 0–100 的整数（满分100），表示对 cycle_position 等诊断结论的综合置信评分。
+禁止使用 high、medium、low 等字符串；分数越高表示对当前市场状态判断越有把握。
 """.strip()
 
 _STAGE2_OUTPUT_CONTRACT = """
@@ -63,14 +66,37 @@ _STAGE2_OUTPUT_CONTRACT = """
 }
 ```
 
-confidence 字段说明：
-- 整数，范围 0-100，表示对本次交易决策的综合信心评分
-- 90-100：极高信心，多重信号共振，市场结构非常清晰
-- 70-89：较高信心，主要信号明确，风险可控
-- 50-69：中等信心，信号存在但有一定不确定性
-- 30-49：较低信心，信号模糊或市场状态不明确，建议减仓或观望
-- 0-29：极低信心，不建议入场，应输出 order_type="不下单"
+confidence 字段说明（无论是否下单都必须填写整数 0-100）：
+- 表示对「本次决策」的综合把握：下单时表示入场方案可信度；不下单时表示对「观望/等待」判断的把握（非入场信心）
+- 90-100：极高把握，结构清晰、理由充分
+- 70-89：较高把握，主要逻辑明确
+- 50-69：中等把握，存在不确定性但仍可执行当前决策（含观望）
+- 30-49：较低把握，建议继续等待更清晰信号
+- 0-29：极低把握；若同时判断不应交易，可配合 order_type="不下单"
 """.strip()
+
+# txt files merged into each stage system prompt (order preserved)
+STAGE1_PROMPT_TXT_FILES: tuple[str, ...] = (
+    "提示词大纲_人设与思维方式.txt",
+    "市场诊断框架.txt",
+    "文件16-K线信号识别.txt",
+)
+
+STAGE2_BASE_PROMPT_TXT_FILES: tuple[str, ...] = (
+    "提示词大纲_人设与思维方式.txt",
+    "文件17-止损和止盈与仓位管理.txt",
+)
+
+
+def stage1_prompt_txt_files() -> list[str]:
+    """Return ordered .txt filenames injected in Stage 1 system prompt."""
+    return list(STAGE1_PROMPT_TXT_FILES)
+
+
+def stage2_prompt_txt_files(strategy_files: list[str] | None = None) -> list[str]:
+    """Return ordered .txt filenames injected in Stage 2 system prompt."""
+    routed = [f for f in (strategy_files or []) if f]
+    return [STAGE2_BASE_PROMPT_TXT_FILES[0], *routed, STAGE2_BASE_PROMPT_TXT_FILES[1]]
 
 
 # ── PromptAssembler ────────────────────────────────────────────────────────────
@@ -122,31 +148,20 @@ class PromptAssembler:
 
     # ── Stage 1 ───────────────────────────────────────────────────────────────
 
-    def build_stage1(self, frame: KlineFrame, htf_text: str) -> list[dict]:
+    def build_stage1(self, frame: KlineFrame) -> list[dict]:
         """Build the message list for Stage 1 (market diagnosis)."""
-        # System prompt: 人设 → 诊断框架 → K线信号 → 输出格式
         system_parts = [
-            self._load("提示词大纲_人设与思维方式.txt"),
-            self._load("市场诊断框架.txt"),
-            self._load("文件16-K线信号识别.txt"),
+            *(self._load(name) for name in STAGE1_PROMPT_TXT_FILES),
             _STAGE1_OUTPUT_REMINDER,
         ]
         system_content = "\n\n" + "\n\n---\n\n".join(p for p in system_parts if p)
 
-        # User prompt
         kline_table = self._render_kline_table(frame)
-        htf_section = (
-            f"## 更高时间框架背景\n\n{htf_text}"
-            if htf_text.strip()
-            else "## 更高时间框架背景\n\n（用户未提供）"
-        )
-
         user_content = (
             f"## 当前分析目标\n\n"
             f"品种：{frame.symbol}　周期：{frame.timeframe}　K线数量：{len(frame.bars)}\n\n"
-            f"## K线数据（序号1=最新含未收盘K线，序号越大越早）\n\n"
+            f"## K线数据（序号1=最新已收盘K线，序号越大越早；不含当前未收盘K线）\n\n"
             f"{kline_table}\n\n"
-            f"{htf_section}\n\n"
             f"请根据以上数据，按照系统提示中的格式输出 JSON 诊断结果。"
         )
 
@@ -166,12 +181,7 @@ class PromptAssembler:
     ) -> list[dict]:
         """Build the message list for Stage 2 (trading decision)."""
         # System prompt: 人设 → 策略文件 → 风控 → 经验 → 输出契约
-        system_parts = [self._load("提示词大纲_人设与思维方式.txt")]
-
-        for fname in strategy_files:
-            system_parts.append(self._load(fname))
-
-        system_parts.append(self._load("文件17-止损和止盈与仓位管理.txt"))
+        system_parts = [self._load(name) for name in stage2_prompt_txt_files(strategy_files)]
 
         if experience_entries:
             exp_text = self._render_experience(experience_entries)
@@ -201,10 +211,7 @@ class PromptAssembler:
         experience_entries: list[Any],
     ) -> str:
         """Return only the Stage 2 system prompt string (for FreeChatSession reuse)."""
-        system_parts = [self._load("提示词大纲_人设与思维方式.txt")]
-        for fname in strategy_files:
-            system_parts.append(self._load(fname))
-        system_parts.append(self._load("文件17-止损和止盈与仓位管理.txt"))
+        system_parts = [self._load(name) for name in stage2_prompt_txt_files(strategy_files)]
         if experience_entries:
             system_parts.append(self._render_experience(experience_entries))
         system_parts.append(_STAGE2_OUTPUT_CONTRACT)
