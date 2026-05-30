@@ -1,4 +1,4 @@
-"""E2E smoke test �?no-order path: stage2 returns 不下�?
+"""E2E smoke test �?no-order path: stage2 returns 不下�?
 
 Task 19.2
 """
@@ -58,7 +58,7 @@ def _make_ctx(tmp_path):
 
 @pytest.mark.e2e
 def test_no_order_shows_no_trade_conclusion(qtbot, tmp_path):
-    """When stage2 returns 不下�? DecisionPanel shows that conclusion."""
+    """When stage2 returns 不下�? DecisionPanel shows that conclusion."""
     from pa_agent.gui.main_window import MainWindow
 
     ctx, pending_writer = _make_ctx(tmp_path)
@@ -77,10 +77,10 @@ def test_no_order_shows_no_trade_conclusion(qtbot, tmp_path):
         timeout=10_000,
     )
 
-    # DecisionPanel should show 不下�?
+    # DecisionPanel should show 不下�?
     conclusion_text = window._decision_panel._conclusion_label.text()
-    assert "不下�? in conclusion_text, (
-        f"Expected 不下�?conclusion, got: {conclusion_text!r}"
+    assert "不下�? in conclusion_text, (
+        f"Expected 不下�?conclusion, got: {conclusion_text!r}"
     )
 
     # Chart should have no InfiniteLine items (no entry/TP/SL lines)
@@ -90,5 +90,5 @@ def test_no_order_shows_no_trade_conclusion(qtbot, tmp_path):
         if isinstance(item, pg.InfiniteLine)
     ]
     assert len(infinite_lines) == 0, (
-        f"Expected no InfiniteLine items for 不下�? found {len(infinite_lines)}"
+        f"Expected no InfiniteLine items for 不下�? found {len(infinite_lines)}"
     )

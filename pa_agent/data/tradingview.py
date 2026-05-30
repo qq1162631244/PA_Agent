@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 from pa_agent.data.base import (
@@ -73,6 +74,10 @@ class TradingViewSource(DataSource):
         self._symbol: str = ""
         self._timeframe: str = ""
         self._exchange: str = ""
+        # Mutex: tvDatafeed is NOT thread-safe — its get_hist() creates a
+        # WebSocket and stores it on self.ws; concurrent calls clobber the
+        # same socket and cause C++ segfaults.
+        self._snapshot_lock = threading.Lock()
         # Callback for status updates during auto-probe: fn(symbol, exchange, label)
         self.on_probe_status = None
 
@@ -242,7 +247,18 @@ class TradingViewSource(DataSource):
         )
 
     def latest_snapshot(self, n: int) -> list[KlineBar]:
-        """Return *n* bars newest-first; bars[0] is the forming (unclosed) bar."""
+        """Return *n* bars newest-first; bars[0] is the forming (unclosed) bar.
+
+        Thread-safety: serialized via ``_snapshot_lock`` because
+        ``TvDatafeed.get_hist()`` is NOT thread-safe — it writes to
+        ``self.ws`` on each call, and concurrent access clobbers the
+        WebSocket, causing C++ segfaults.
+        """
+        with self._snapshot_lock:
+            return self._latest_snapshot_inner(n)
+
+    def _latest_snapshot_inner(self, n: int) -> list[KlineBar]:
+        """Actual snapshot logic — caller holds ``_snapshot_lock``."""
         if self._tv is None:
             raise DataSourceTransientError("TradingView 未连接，请先选择数据来源 TradingView")
         if not self._symbol or not self._timeframe:

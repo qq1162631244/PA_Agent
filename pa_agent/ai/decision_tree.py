@@ -207,13 +207,17 @@ def load_decision_tree(path: Path | None = None) -> dict[str, Any]:
     }
 
 
-def normalize_bar_range(item: dict[str, Any]) -> str:
-    """Return display token like ``K50-K1`` or ``K1`` from a trace item."""
+def normalize_bar_range(item: dict[str, Any], *, default_max_seq: int | None = None) -> str:
+    """Return display token like ``K50-K1`` or ``K1`` from a trace item.
+
+    When *default_max_seq* is provided, K0 references (unclosed bar) are
+    automatically capped to K1 so that downstream validators see valid seqs.
+    """
     from pa_agent.ai.trace_normalize import fix_bar_range_string
 
     raw = item.get("bar_range")
     if raw is not None and str(raw).strip():
-        return fix_bar_range_string(str(raw))
+        return fix_bar_range_string(str(raw), default_max_seq=default_max_seq)
 
     bar_from = item.get("bar_from")
     bar_to = item.get("bar_to")

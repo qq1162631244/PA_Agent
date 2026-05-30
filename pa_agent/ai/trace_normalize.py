@@ -264,6 +264,8 @@ def fix_bar_range_string(text: str, *, default_max_seq: int | None = None) -> st
             a, b = b, a
         a = _cap_bar_seq(a, default_max_seq)
         b = _cap_bar_seq(b, default_max_seq)
+        if a == b:
+            return f"K{a}"
         return f"K{a}-K{b}"
 
     single = _SINGLE_BAR_RE.match(compact)

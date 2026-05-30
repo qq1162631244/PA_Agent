@@ -1,4 +1,4 @@
-"""E2E smoke test â€?free-chat session after two-stage analysis.
+"""E2E smoke test ï¿½?free-chat session after two-stage analysis.
 
 Task 19.4
 """

@@ -654,15 +654,16 @@ class JsonValidator:
                 f"next_bar_prediction.probabilities: sum={total}, must satisfy 99 <= sum <= 101"
             )
 
-        # R3.3: direction = argmax, break ties by literal order
+        # R3.3: direction = argmax, accept any tied winner
         order = ("bullish", "bearish", "neutral")
         max_value = max(probs[k] for k in order)
-        expected = next(k for k in order if probs[k] == max_value)
+        tied_winners = [k for k in order if probs[k] == max_value]
         direction = pred.get("direction")
-        if direction != expected:
+        if direction not in tied_winners:
+            expected = tied_winners[0]
             errors.append(
-                f"next_bar_prediction.direction: expected '{expected}' (argmax of probabilities), "
-                f"got {direction!r}"
+                f"next_bar_prediction.direction: expected one of {tied_winners} "
+                f"(argmax of probabilities), got {direction!r}"
             )
 
         return errors

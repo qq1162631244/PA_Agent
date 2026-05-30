@@ -400,7 +400,7 @@ _NEXT_BAR_PREDICTION_INSTRUCTION = """\
 # txt files merged into each stage prompt (order preserved)
 COMMON_SYSTEM_STAGE1_TXT_FILES: tuple[str, ...] = (
     "提示词大纲_人设与思维方式.txt",
-    "二元决策_闸门.txt",
+    "二元决策.txt",           # unified with Stage 2 for prefix caching; §0–§2 gate subset is included
 )
 COMMON_SYSTEM_STAGE2_TXT_FILES: tuple[str, ...] = (
     "提示词大纲_人设与思维方式.txt",
@@ -639,16 +639,63 @@ class PromptAssembler:
         previous_record: AnalysisRecord,
         new_bar_count: int,
     ) -> list[dict]:
-        """Build Stage 1 as an incremental update from a previous record."""
+        """Build Stage 1 as a continuation-based incremental update.
+
+        Structure:
+          [0] system    — Stage 1 system prompt (same as full Stage 1)
+          [1] user      — Previous full Stage 1 user prompt (with K-line table)
+          [2] assistant — Previous Stage 1 reply
+          [3] user      — Incremental task (new K-lines only, no full table)
+
+        Benefits vs old 2-message incremental:
+        - [system, user(S1)] prefix is IDENTICAL to full Stage 1 → prefix cache hit
+        - Full K-line table is in [1], not re-sent in [3] → saves ~14.5K tokens
+        - Stage 2 continuation can also cache-hit this prefix chain
+        """
+        prev_s1_messages = getattr(previous_record, "stage1_messages", None) or []
+        prev_s1_response = getattr(previous_record, "stage1_response", None) or {}
+
+        # Extract previous Stage 1 user message
+        prev_user_content = ""
+        for msg in prev_s1_messages:
+            if msg.get("role") == "user":
+                prev_user_content = msg["content"]
+                break
+
+        # Extract previous Stage 1 assistant reply content
+        prev_assistant_content = ""
+        if isinstance(prev_s1_response, dict):
+            prev_assistant_content = prev_s1_response.get("content", "") or ""
+
+        if not prev_user_content:
+            raise ValueError(
+                f"build_incremental_stage1: previous_record.stage1_messages "
+                f"contains no user message. "
+                f"stage1_messages has {len(prev_s1_messages)} items, "
+                f"roles={[m.get('role') for m in prev_s1_messages]}. "
+                f"record.meta: {getattr(previous_record, 'meta', '<missing>')!r}"
+            )
+        if not prev_assistant_content:
+            raise ValueError(
+                f"build_incremental_stage1: previous_record.stage1_response "
+                f"has no 'content' field. "
+                f"stage1_response type={type(prev_s1_response).__name__}, "
+                f"keys={list(prev_s1_response.keys()) if isinstance(prev_s1_response, dict) else 'N/A'}. "
+                f"record.meta: {getattr(previous_record, 'meta', '<missing>')!r}"
+            )
+
         system_content = self._build_stage1_system_prompt()
-        user_content = self._build_incremental_stage1_user_prompt(
+        incremental_user_content = self._build_incremental_stage1_continuation_user_prompt(
             frame,
             previous_record,
             new_bar_count,
         )
+
         return [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": user_content},
+            {"role": "system",    "content": system_content},
+            {"role": "user",      "content": prev_user_content},
+            {"role": "assistant", "content": prev_assistant_content},
+            {"role": "user",      "content": incremental_user_content},
         ]
 
     def _build_stage1_system_prompt(self) -> str:
@@ -766,6 +813,64 @@ class PromptAssembler:
             f"{_STAGE1_TAIL_REMINDER}"
         )
 
+    def _build_incremental_stage1_continuation_user_prompt(
+        self,
+        frame: KlineFrame,
+        previous_record: AnalysisRecord,
+        new_bar_count: int,
+    ) -> str:
+        """Build the incremental continuation user turn (message [3] in 4-message mode).
+
+        Only sends NEW K-line data; the model can reference the full K-line table
+        from the previous Stage 1 user message ([1]) above.
+        """
+        n_bars = len(frame.bars)
+        new_count = max(0, min(new_bar_count, n_bars))
+        new_kline_table = self._render_kline_table(frame, limit=new_count)
+        new_feature_table = self._render_kline_feature_table(frame, limit=new_count)
+        previous_summary = {
+            "meta": previous_record.meta.model_dump(),
+            "stage1_diagnosis": previous_record.stage1_diagnosis or {},
+            "stage2_decision": previous_record.stage2_decision or {},
+            "strategy_files_used": previous_record.strategy_files_used or [],
+        }
+        return (
+            "## 阶段一增量更新任务\n\n"
+            "上方是你上一轮完成的阶段一诊断。现在基于新增 K 线，更新诊断与闸门判断。\n"
+            "完整 K 线数据已包含在上方阶段一用户消息中（K线序号已重新编号，"
+            "K1=当前最新已收盘K线），你可以回溯查看任何历史 K 线。\n\n"
+            "⚠ 反锚定要求——这是增量分析最重要的原则：\n"
+            "- 不要因为上一轮已得出结论就倾向于延续它；上一轮结论只是参考起点，不是约束。\n"
+            "- 如果新增 K 线改变了市场结构（突破、反转、趋势加速/衰竭），必须果断推翻上一轮结论，而非在旧结论上微调。\n"
+            "- 判断标准：如果你是第一次看到这组完整 K 线（包括上方历史K线+新增K线），你会得出什么结论？那才是正确结论。\n"
+            "- 每次增量更新都应视为一次重新诊断——只是你不必重复描述未变的部分。\n\n"
+            "增量分析规则：\n"
+            "- 先独立审视完整 K 线数据，形成自己的判断，再与上一轮结论对照。\n"
+            "- 如果市场结构确实未被破坏，可以延续上一轮 cycle_position/direction，但必须用新增 K 线重新说明依据。\n"
+            "- 如果新增 K 线出现突破、反转、极端波动或让原结论失效，必须更新诊断——宁可过度更新，不可锚定延续。\n"
+            "- 必须输出顶层字段 **incremental_delta**（不可省略），结构示例：\n"
+            '  "incremental_delta": {"new_closed_bars":["K1"],'
+            '"changed_fields":["direction","cycle_position"],'
+            '"summary":"相对上一轮：新增K1突破区间上沿，方向由中性转偏多"}\n'
+            "- new_closed_bars 长度必须等于「新增已收盘K线」数量（1根则只写 [\"K1\"]）。\n"
+            "- 并在 summary / risk_warning / gate_trace 中说明相对上一轮变化。\n"
+            "- gate_result=proceed 时 gate_trace 仍须覆盖 §0–§2 全部闸门节点（0.1–2.5）。\n"
+            "- 输出仍必须是完整阶段一 JSON，而不是差异补丁。\n\n"
+            f"## 当前分析目标更新\n\n"
+            f"品种:{frame.symbol} 周期:{frame.timeframe} K线数量:{n_bars} 新增已收盘K线:{new_count}\n"
+            f"（K线序号已重新编号：1=最新已收盘，最大 K{n_bars}；"
+            f"每个决策节点的 bar_range 由你自行选择子区间，勿超出 K{n_bars}-K1）\n\n"
+            "## 上一轮已完成分析（仅作为延续上下文）\n\n"
+            f"```json\n{json.dumps(previous_summary, ensure_ascii=False, indent=2)}\n```\n\n"
+            f"## 新增 K线数据(共{new_count}根，序号1=最新已收盘；含阳阴列)\n\n"
+            f"{new_kline_table}\n\n"
+            f"## 新增 K线几何特征(共{new_count}根；多棒形态按完整{n_bars}根窗口计算，"
+            f"与前棒重叠/内包/ioi 以完整表为准)\n\n"
+            f"{new_feature_table}\n\n"
+            "请基于上方完整K线数据、上一轮结论和新增K线，严格输出更新后的阶段一 JSON 诊断结果。\n\n"
+            f"{_STAGE1_TAIL_REMINDER}"
+        )
+
     # ── Stage 2 ───────────────────────────────────────────────────────────────
 
     def build_stage2(
@@ -838,27 +943,44 @@ class PromptAssembler:
         decision_stance: str = "conservative",
         previous_record: Any | None = None,
     ) -> list[dict]:
-        """Build Stage 2 continuation without duplicating the Stage 1 user prompt.
+        """Build Stage 2 as a true continuation of the Stage 1 conversation.
 
-        Stage 1 user turn is huge (framework + 100 bars). Re-sending it for Stage 2
-        balloons prompt tokens and often exhausts thinking before any content JSON.
+        Structure:
+          [0] system    — Stage 2 system prompt (full decision tree, same as Stage 1)
+          [1] user      — Stage 1 original user prompt (with K-line table, from stage1_messages)
+          [2] assistant — Stage 1 reply JSON
+          [3] user      — Stage 2 task prompt (without K-line table)
+
+        Benefits:
+        - K-line table sent only once (in [1]), not duplicated in [3]
+        - system prompt identical to Stage 1 → prefix caching hits the full prefix
+        - Model can reference Stage 1 K-line data without re-reading
         """
         system_content = self._build_stage2_system_prompt()
+
+        # Extract Stage 1 user message (contains K-line table; no need to rebuild)
+        stage1_user_content = ""
+        for msg in stage1_messages:
+            if msg.get("role") == "user":
+                stage1_user_content = msg["content"]
+                break
+
+        # Stage 2 user prompt: include_kline_table=False → "沿用上一轮" fallback
+        stage2_user_content = self._build_stage2_user_prompt(
+            frame=frame,
+            stage1_json=stage1_json,
+            strategy_files=strategy_files,
+            experience_entries=experience_entries,
+            include_kline_table=False,
+            decision_stance=decision_stance,
+            previous_record=previous_record,
+        )
+
         return [
-            {"role": "system", "content": system_content},
+            {"role": "system",    "content": system_content},
+            {"role": "user",      "content": stage1_user_content},
             {"role": "assistant", "content": stage1_reply_content},
-            {
-                "role": "user",
-                "content": self._build_stage2_user_prompt(
-                    frame=frame,
-                    stage1_json=stage1_json,
-                    strategy_files=strategy_files,
-                    experience_entries=experience_entries,
-                    include_kline_table=True,
-                    decision_stance=decision_stance,
-                    previous_record=previous_record,
-                ),
-            },
+            {"role": "user",      "content": stage2_user_content},
         ]
 
     def _build_stage2_user_prompt(
@@ -929,7 +1051,11 @@ class PromptAssembler:
             "基于当前 N 根已收盘 K 线，指标非全历史延续)\n\n"
             f"{feature_table}\n\n"
             if include_kline_table
-            else f"## K线数据\n\n沿用上一轮阶段一用户消息中的同一份 K线数据，共 {n_bars} 根；各节点 bar_range 由你据实填写。\n\n"
+            else (
+                f"## K线数据\n\n"
+                f"沿用上一轮阶段一用户消息中的同一份 K线数据，共 {n_bars} 根。"
+                f"各节点 bar_range 由你据实填写，必要时可回溯上方阶段一用户消息查看具体价格。\n\n"
+            )
         )
         if breakout_tick_hint and include_kline_table:
             kline_block += f"{breakout_tick_hint}\n\n"

@@ -213,7 +213,7 @@ def validate_trace_bars_in_frame(
             continue
         if item.get("skipped") and item.get("answer") == "不适用":
             continue
-        br = normalize_bar_range(item)
+        br = normalize_bar_range(item, default_max_seq=max_seq)
         if not br or br in ("不适用", "—", "全局"):
             continue
         seqs = _parse_bar_range_seqs(br)

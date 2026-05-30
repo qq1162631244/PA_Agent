@@ -16,8 +16,9 @@ from pa_agent.ai.prompt_assembler import (
 def test_stage1_txt_files() -> None:
     files = stage1_prompt_txt_files()
     assert files == [*COMMON_SYSTEM_STAGE1_TXT_FILES, *STAGE1_TASK_PROMPT_TXT_FILES]
-    assert "二元决策_闸门.txt" in files
-    assert "二元决策.txt" not in files
+    # Stage 1 now uses the full binary tree (same as Stage 2) for prefix caching
+    assert "二元决策.txt" in files
+    assert "二元决策_闸门.txt" not in files
     assert "文件13-窄通道与宽通道策略.txt" not in files
 
 

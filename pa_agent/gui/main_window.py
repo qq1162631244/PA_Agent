@@ -171,6 +171,7 @@ class MainWindow(QMainWindow):
         self._pending_submit_bar_count = 0
         self._last_forming_ts_open: int | None = None
         self._last_frame_ready_bars: list[Any] | None = None
+        self._auto_incremental_pending: bool = False
         self._free_chat_session: Any = None
         self._last_stage1_diagnosis: dict | None = None
         self._demo_mode = False
@@ -525,6 +526,9 @@ class MainWindow(QMainWindow):
 
     def _start_refresh_loop(self) -> None:
         """Start the RefreshLoop only when the data source is connected."""
+        # Reap any zombie loops before starting a fresh one
+        self._reap_zombie_loops()
+
         data_source = getattr(self._ctx, "data_source", None)
         if data_source is None:
             logger.debug("RefreshLoop not started: data_source not available")
@@ -567,17 +571,94 @@ class MainWindow(QMainWindow):
         self._update_symbol_data_alert()
 
     def _stop_refresh_loop(self) -> None:
-        """Stop the background RefreshLoop thread if running."""
+        """Stop the background RefreshLoop thread if running.
+
+        Disconnects signals before waiting so that a zombie loop's callbacks
+        cannot fire after the owning MainWindow has moved on (e.g. symbol/tf
+        switch, new worker started).
+
+        If the loop does not finish within ``_WORKER_JOIN_TIMEOUT_MS`` it is
+        tracked as a zombie.  Zombie loops are reaped later in
+        ``_reap_zombie_loops()`` so their QThread resources are eventually
+        freed.
+        """
         loop = getattr(self, "_refresh_loop", None)
         token = getattr(self, "_refresh_cancel_token", None)
         if loop is None:
             return
+        # Disconnect signals first to prevent zombie callbacks
+        try:
+            loop.frame_ready.disconnect(self._on_refresh_frame_ready)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            loop.status_changed.disconnect(self._on_status_update)
+        except (TypeError, RuntimeError):
+            pass
         if token is not None:
             token.set()
         if loop.isRunning():
-            loop.wait(3000)
+            loop.wait(_WORKER_JOIN_TIMEOUT_MS)
+            if loop.isRunning():
+                # RefreshLoop is stuck in a blocking WebSocket call — it will
+                # eventually time out and check the cancel token, but until
+                # then we track it as a zombie so it can be reaped later.
+                logger.warning(
+                    "RefreshLoop did not finish within %d ms; tracking as zombie",
+                    _WORKER_JOIN_TIMEOUT_MS,
+                )
+                zombies = getattr(self, "_zombie_loops", None)
+                if zombies is None:
+                    zombies = []
+                    self._zombie_loops = zombies
+                zombies.append(loop)
+            else:
+                loop.deleteLater()
+        else:
+            loop.deleteLater()
         self._refresh_loop = None
         self._refresh_cancel_token = None
+
+    def _cancel_snapshot_fetch_worker(self) -> None:
+        """Cancel any running SnapshotFetchWorker and nullify its reference.
+
+        Uses a generation-based invalidation: the callback closures check
+        ``_snapshot_fetch_id`` before acting, so stale workers that finish
+        after cancellation are silently ignored.
+        """
+        sfw = getattr(self, "_snapshot_fetch_worker", None)
+        if sfw is not None:
+            # Invalidate the fetch generation so stale callbacks are no-ops
+            self._snapshot_fetch_id = None
+            self._snapshot_fetch_worker = None
+            if sfw.isRunning():
+                sfw.wait(_WORKER_JOIN_TIMEOUT_MS)
+                if sfw.isRunning():
+                    logger.warning(
+                        "SnapshotFetchWorker did not finish within %d ms; "
+                        "it will eventually finish but results will be ignored",
+                        _WORKER_JOIN_TIMEOUT_MS,
+                    )
+
+    def _reap_zombie_loops(self) -> None:
+        """Join any zombie RefreshLoops that have finished since last check.
+
+        Called periodically (e.g. from ``_on_worker_done``) to free QThread
+        resources that were stranded when ``_stop_refresh_loop`` timed out.
+        """
+        zombies = getattr(self, "_zombie_loops", None)
+        if not zombies:
+            return
+        still_alive: list = []
+        for loop in zombies:
+            if loop.isRunning():
+                still_alive.append(loop)
+            else:
+                loop.deleteLater()
+        if still_alive:
+            self._zombie_loops = still_alive
+        else:
+            self._zombie_loops = []
 
     def _disconnect_data_source(self, data_source: Any) -> None:
         if data_source is None:
@@ -1289,6 +1370,20 @@ class MainWindow(QMainWindow):
         if self._chart_refresh_paused:
             return
 
+        # Auto-incremental: if a switch set the pending flag, trigger now
+        if self._auto_incremental_pending and bars:
+            self._auto_incremental_pending = False
+            symbol = self._symbol_combo.currentText().strip()
+            tf = self._tf_combo.currentText()
+            bar_count = self._analysis_bar_count()
+            if self._bars_sufficient_for_analysis(bars, bar_count):
+                self._start_analysis_with_bars(
+                    symbol, tf, bar_count, bars, force_incremental=False
+                )
+                return
+            # Not enough bars yet — keep the flag and try again next time
+            self._auto_incremental_pending = True
+
         if not bars:
             self._update_symbol_data_alert()
             return
@@ -1331,6 +1426,10 @@ class MainWindow(QMainWindow):
             return
 
         self._clear_pending_bar_close_wait()
+
+        # Cancel any running SnapshotFetchWorker so its stale callbacks don't
+        # fire after we've already changed symbol/tf (would corrupt state).
+        self._cancel_snapshot_fetch_worker()
 
         # Stop any running refresh — user must click "获取数据" to re-fetch
         self._stop_refresh_loop()
@@ -1443,6 +1542,51 @@ class MainWindow(QMainWindow):
                 self._refresh_last_forming_ts()
                 self._update_wait_close_countdown_display()
             self._refresh_chart_once()
+
+            # Check for prior analysis record — if found, auto-trigger incremental
+            self._check_auto_incremental(new_symbol, new_tf)
+
+    def _check_auto_incremental(self, symbol: str, timeframe: str) -> None:
+        """After a symbol/tf switch, look for a prior record and set the
+        auto-incremental flag so analysis triggers once bars are available."""
+        self._auto_incremental_pending = False
+
+        settings = getattr(self._ctx, "settings", None)
+        threshold = int(
+            getattr(getattr(settings, "general", None), "incremental_max_new_bars", 10)
+        )
+        if threshold <= 0:
+            return
+
+        try:
+            from pa_agent.records.analysis_history import find_latest_successful_record
+
+            previous = find_latest_successful_record(
+                symbol=symbol, timeframe=timeframe
+            )
+            if previous is None:
+                return
+
+            self._auto_incremental_pending = True
+            self._status_bar.showMessage(
+                f"找到历史记录，下次分析将自动增量（{symbol} {timeframe}）"
+            )
+            logger.info(
+                "Auto-incremental: found prior record for %s %s, flag set",
+                symbol,
+                timeframe,
+            )
+
+            # If bars are already cached, trigger immediately
+            bar_count = self._analysis_bar_count()
+            bars = self._bars_for_analysis_submit(bar_count)
+            if bars and self._bars_sufficient_for_analysis(bars, bar_count):
+                self._auto_incremental_pending = False
+                self._start_analysis_with_bars(
+                    symbol, timeframe, bar_count, bars, force_incremental=False
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Auto-incremental check failed: %s", exc)
 
     def _disable_chat_input(self) -> None:
         """Disable free-chat input in the AI stream window."""
@@ -1946,6 +2090,9 @@ class MainWindow(QMainWindow):
         if not self._can_submit():
             return
 
+        # Clear auto-incremental flag — user initiated analysis manually
+        self._auto_incremental_pending = False
+
         # Cancel any existing worker before starting a new one
         if self._worker is not None and self._worker.isRunning():
             if self._cancel_token is not None:
@@ -2018,10 +2165,9 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage("数据源未连接")
             return
 
-        prev = getattr(self, "_snapshot_fetch_worker", None)
-        if prev is not None and prev.isRunning():
-            self._status_bar.showMessage("正在获取K线，请稍候…")
-            return
+        # Cancel any previous worker (belt-and-suspenders; normally cleaned
+        # up by _on_worker_done, but a rapid re-trigger could race).
+        self._cancel_snapshot_fetch_worker()
 
         from pa_agent.gui.snapshot_worker import SnapshotFetchWorker
 
@@ -2031,9 +2177,15 @@ class MainWindow(QMainWindow):
         worker = SnapshotFetchWorker(
             data_source, bar_count + INDICATOR_WARMUP_BARS + 5, parent=None
         )
+        # Use a generation token so that stale callbacks from a cancelled
+        # worker are silently ignored (closures can't easily be disconnected).
+        fetch_id = object()
+        self._snapshot_fetch_id = fetch_id
         self._snapshot_fetch_worker = worker
 
         def _on_bars(bars: list) -> None:
+            if getattr(self, "_snapshot_fetch_id", None) is not fetch_id:
+                return  # stale fetch — ignore
             self._snapshot_fetch_worker = None
             if not self._bars_sufficient_for_analysis(bars, bar_count):
                 self._status_bar.showMessage("数据不足，请等待图表刷新后再提交")
@@ -2048,6 +2200,8 @@ class MainWindow(QMainWindow):
             )
 
         def _on_fail(msg: str) -> None:
+            if getattr(self, "_snapshot_fetch_id", None) is not fetch_id:
+                return  # stale fetch — ignore
             self._snapshot_fetch_worker = None
             self._status_bar.showMessage(msg or "获取K线失败")
 
@@ -2751,8 +2905,13 @@ class MainWindow(QMainWindow):
     def _on_worker_done(self) -> None:
         """Reset in-progress flag and re-enable the submit button."""
         self._analysis_in_progress = False
+        self._auto_incremental_pending = False
         self._worker = None
         self._update_submit_button_state()
+
+        # Reap any zombie RefreshLoops that finished while we were busy
+        self._reap_zombie_loops()
+
         auto_resumed = self._maybe_auto_resume_chart_after_analysis()
         if self._last_analysis_had_error:
             msg = "分析结束（存在错误，请查看「原始」页调试信息）"

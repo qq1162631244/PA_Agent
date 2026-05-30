@@ -1,4 +1,4 @@
-"""E2E smoke test â€?symbol switch mid-flight cancels the AI worker.
+"""E2E smoke test ï¿½?symbol switch mid-flight cancels the AI worker.
 
 Task 19.3
 """
@@ -41,10 +41,10 @@ def _make_ctx_slow_stage2(tmp_path):
         slow_chat._call_count += 1
 
         if call_count == 0:
-            # Stage 1 â€?return immediately
+            # Stage 1 ï¿½?return immediately
             return _make_reply(VALID_STAGE1)
         else:
-            # Stage 2 â€?signal that we've started, then block until cancelled
+            # Stage 2 ï¿½?signal that we've started, then block until cancelled
             stage2_started.set()
             deadline = time.monotonic() + 5.0
             while time.monotonic() < deadline:

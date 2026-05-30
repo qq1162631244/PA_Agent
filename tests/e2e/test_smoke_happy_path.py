@@ -1,4 +1,4 @@
-"""E2E smoke test ‚Ä?happy path: two-stage analysis produces a trading decision.
+"""E2E smoke test ÔøΩ?happy path: two-stage analysis produces a trading decision.
 
 Task 19.1
 """
@@ -82,13 +82,13 @@ def test_happy_path_shows_trading_decision(qtbot, tmp_path):
         timeout=10_000,
     )
 
-    # DecisionPanel should show a trading decision (not ‰∏ç‰∏ãÂç?
+    # DecisionPanel should show a trading decision (not ‰∏ç‰∏ãÔøΩ?
     conclusion_text = window._decision_panel._conclusion_label.text()
-    assert "‰∏ç‰∏ãÂç? not in conclusion_text, (
+    assert "‰∏ç‰∏ãÔøΩ? not in conclusion_text, (
         f"Expected a trading decision, got: {conclusion_text!r}"
     )
-    assert conclusion_text != "‚Ä?, (
-        "DecisionPanel still shows default '‚Ä?, expected a decision"
+    assert conclusion_text != "ÔøΩ?, (
+        "DecisionPanel still shows default 'ÔøΩ?, expected a decision"
     )
 
     # PendingWriter.save_full should have been called

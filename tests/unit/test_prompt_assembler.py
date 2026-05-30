@@ -73,24 +73,24 @@ def assembler(tmp_path: Path) -> PromptAssembler:
 
 
 def test_stage1_system_prompt_order(assembler: PromptAssembler):
-    """Stage 1 system: shared persona + binary tree; user: framework + signals."""
+    """Stage 1 system: shared persona + full binary tree; user: framework + signals."""
     frame = _make_frame()
     messages = assembler.build_stage1(frame)
     system = messages[0]["content"]
     user = messages[1]["content"]
     pos_persona = system.find("提示词大纲_人设与思维方式")
-    pos_binary_sys = system.find("二元决策_闸门")
+    pos_binary_sys = system.find("二元决策")
     assert pos_persona >= 0
-    assert 0 <= pos_persona < pos_binary_sys, "Gate-only binary tree should follow persona in system"
+    assert 0 <= pos_persona < pos_binary_sys, "Binary decision tree should follow persona in system"
+    # Stage 1 now uses the FULL binary tree (same as Stage 2) for prefix caching
     assert "市场诊断框架" not in system
-    assert "## 3." not in system, "Stage 1 system must not include §3+ execution chapters"
 
     pos_diag = user.find("市场诊断框架")
     pos_signal = user.find("文件16-K线信号识别")
     pos_bar_by_bar = user.find("逐棒分析检查单")
     assert "是否为尖峰 / 极速行情" not in system
-    assert "[CONTENT OF 二元决策_闸门.txt]" in system
-    assert "[CONTENT OF 二元决策.txt]" not in system
+    assert "[CONTENT OF 二元决策.txt]" in system
+    assert "[CONTENT OF 二元决策_闸门.txt]" not in system
     assert 0 <= pos_diag < pos_signal, "Stage 1 user task files are out of order"
     assert 0 <= pos_signal < pos_bar_by_bar, "Bar-by-bar checklist should follow signal file"
     assert "文件18-突破失败与突破测试" not in user
@@ -282,16 +282,20 @@ def test_stage2_continuation_omits_stage1_user_prompt(assembler: PromptAssembler
         experience_entries=[],
     )
 
-    assert [m["role"] for m in messages] == ["system", "assistant", "user"]
-    assert messages[0]["content"] != stage1_messages[0]["content"]
+    # New 4-message structure: system, user(S1), assistant(S1), user(S2)
+    assert [m["role"] for m in messages] == ["system", "user", "assistant", "user"]
+    # System prompt includes full binary tree (same as Stage 1 now)
     assert "二元决策.txt" in messages[0]["content"] or "## 3." in messages[0]["content"]
-    assert "二元决策_闸门.txt" in stage1_messages[0]["content"] or "§0" in stage1_messages[0]["content"]
-    assert "cycle_position" in messages[1]["content"]
-    assert "K线数据" in messages[2]["content"]
-    assert "沿用上一轮阶段一用户消息中的同一份 K线数据" not in messages[2]["content"]
-    assert "下跌通道分析识别" in messages[2]["content"]
-    assert "上涨通道分析识别" not in messages[2]["content"]
-    assert "【最后一步·必做】" in messages[2]["content"]
+    # Message [1] is Stage 1 user prompt (with K-line table)
+    assert "K线数据" in messages[1]["content"]
+    assert "序号 | 时间" in messages[1]["content"]  # K-line table present
+    # Message [2] is Stage 1 assistant reply
+    assert "cycle_position" in messages[2]["content"]
+    # Message [3] is Stage 2 user prompt (without K-line table)
+    assert "沿用上一轮阶段一用户消息中的同一份 K线数据" in messages[3]["content"]
+    assert "下跌通道分析识别" in messages[3]["content"]
+    assert "上涨通道分析识别" not in messages[3]["content"]
+    assert "【最后一步·必做】" in messages[3]["content"]
 
 
 def test_stage2_prompt_includes_balanced_stance_guidance(assembler: PromptAssembler):
@@ -314,7 +318,70 @@ def test_stage2_prompt_conservative_omits_balanced_only_hints(assembler: PromptA
 def test_incremental_stage1_prompt_includes_previous_record_and_new_bars(
     assembler: PromptAssembler,
 ):
-    """Incremental Stage 1 prompt carries previous analysis and new bars."""
+    """Incremental Stage 1 with full previous record uses 4-message continuation."""
+    from pa_agent.records.schema import AnalysisRecord, RecordMeta
+
+    frame = _make_frame(5)
+    # Build a full Stage 1 to get realistic messages/response for the previous record
+    full_s1_messages = assembler.build_stage1(frame)
+    prev_user = next(m["content"] for m in full_s1_messages if m["role"] == "user")
+    prev_assistant = '{"cycle_position":"normal_channel","gate_result":"proceed"}'
+
+    previous = AnalysisRecord(
+        meta=RecordMeta(
+            timestamp_local_iso="2026-01-01T00:00:00.000",
+            timestamp_local_ms=1,
+            symbol="XAUUSD",
+            timeframe="1h",
+            bar_count=5,
+            ai_provider={},
+        ),
+        kline_data=[],
+        htf_text="",
+        stage1_messages=full_s1_messages,
+        stage1_response={"content": prev_assistant},
+        stage1_diagnosis={"cycle_position": "normal_channel"},
+        stage2_messages=[],
+        stage2_response=None,
+        stage2_decision={"decision": {"order_type": "不下单"}},
+        strategy_files_used=["上涨通道分析识别.txt"],
+        experience_loaded=[],
+        exception=None,
+        usage_total={},
+    )
+
+    messages = assembler.build_incremental_stage1(frame, previous, 2)
+
+    # 4-message continuation structure: system, user(prev S1), assistant(prev S1 reply), user(incremental)
+    assert [m["role"] for m in messages] == ["system", "user", "assistant", "user"]
+    # Message [1] is the previous full Stage 1 user prompt (with K-line table)
+    assert messages[1]["content"] == prev_user
+    # Message [2] is the previous Stage 1 reply
+    assert messages[2]["content"] == prev_assistant
+    # Message [3] is the incremental task
+    incremental_user = messages[3]["content"]
+    assert "阶段一增量更新任务" in incremental_user
+    assert "新增已收盘K线:2" in incremental_user
+    assert "上一轮已完成分析" in incremental_user
+    assert "normal_channel" in incremental_user
+    # Anti-anchoring directives must be present
+    assert "反锚定要求" in incremental_user
+    assert "不要因为上一轮已得出结论就倾向于延续它" in incremental_user
+    assert "宁可过度更新，不可锚定延续" in incremental_user
+    assert "先独立审视完整 K 线数据" in incremental_user
+    # No full K-line table in the incremental user message
+    assert "当前完整 K线数据" not in incremental_user
+    assert "当前完整 K线几何特征" not in incremental_user
+    # But new K-line data is present
+    assert "新增 K线数据" in incremental_user
+    assert "完整窗口计算" in incremental_user
+
+
+def test_incremental_stage1_raises_without_previous_messages(
+    assembler: PromptAssembler,
+):
+    """Incremental Stage 1 raises ValueError when previous record lacks messages."""
+    import pytest
     from pa_agent.records.schema import AnalysisRecord, RecordMeta
 
     frame = _make_frame(5)
@@ -329,8 +396,8 @@ def test_incremental_stage1_prompt_includes_previous_record_and_new_bars(
         ),
         kline_data=[],
         htf_text="",
-        stage1_messages=[],
-        stage1_response=None,
+        stage1_messages=[],  # empty → must raise
+        stage1_response=None,  # None → must raise
         stage1_diagnosis={"cycle_position": "normal_channel"},
         stage2_messages=[],
         stage2_response=None,
@@ -341,18 +408,45 @@ def test_incremental_stage1_prompt_includes_previous_record_and_new_bars(
         usage_total={},
     )
 
-    messages = assembler.build_incremental_stage1(frame, previous, 2)
+    with pytest.raises(ValueError, match="stage1_messages contains no user message"):
+        assembler.build_incremental_stage1(frame, previous, 2)
 
-    assert [m["role"] for m in messages] == ["system", "user"]
-    user = messages[1]["content"]
-    assert "阶段一增量任务" in user
-    assert "新增已收盘K线:2" in user
-    assert "上一轮已完成分析" in user
-    assert "normal_channel" in user
-    assert "当前完整 K线数据" in user
-    assert "当前完整 K线几何特征" in user
-    assert "完整窗口计算" in user
-    assert "指标非全历史延续" in user
+
+def test_incremental_stage1_raises_without_previous_response(
+    assembler: PromptAssembler,
+):
+    """Incremental Stage 1 raises ValueError when previous record lacks response content."""
+    import pytest
+    from pa_agent.records.schema import AnalysisRecord, RecordMeta
+
+    frame = _make_frame(5)
+    # Build full Stage 1 messages so stage1_messages is populated
+    full_s1 = assembler.build_stage1(frame)
+    previous = AnalysisRecord(
+        meta=RecordMeta(
+            timestamp_local_iso="2026-01-01T00:00:00.000",
+            timestamp_local_ms=1,
+            symbol="XAUUSD",
+            timeframe="1h",
+            bar_count=5,
+            ai_provider={},
+        ),
+        kline_data=[],
+        htf_text="",
+        stage1_messages=full_s1,  # has user message
+        stage1_response={},  # empty dict → no 'content' key → must raise
+        stage1_diagnosis={"cycle_position": "normal_channel"},
+        stage2_messages=[],
+        stage2_response=None,
+        stage2_decision={"decision": {"order_type": "不下单"}},
+        strategy_files_used=["上涨通道分析识别.txt"],
+        experience_loaded=[],
+        exception=None,
+        usage_total={},
+    )
+
+    with pytest.raises(ValueError, match="stage1_response has no 'content' field"):
+        assembler.build_incremental_stage1(frame, previous, 2)
 
 
 def test_stage1_prompt_has_kline_indicator_disclaimer(assembler: PromptAssembler) -> None:
@@ -445,7 +539,7 @@ def test_previous_prediction_rendered_in_incremental_mode(assembler: PromptAssem
         previous_record=previous,
     )
 
-    user = messages[2]["content"]
+    user = messages[3]["content"]  # Stage 2 user prompt is now at index 3
     assert "上一轮下一根K线预测" in user
     assert "阳线" in user
     assert "60%" in user
@@ -507,5 +601,5 @@ def test_unpredictable_previous_prediction_renders_note(assembler: PromptAssembl
         previous_record=previous,
     )
 
-    user = messages[2]["content"]
+    user = messages[3]["content"]  # Stage 2 user prompt is now at index 3
     assert "不可预测" in user
