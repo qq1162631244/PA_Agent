@@ -3576,19 +3576,15 @@ class MainWindow(QMainWindow):
             return False
 
         from pa_agent.gui.order_opportunity import (
-            format_order_alert_message,
             play_order_alert_sound,
+            show_order_opportunity_alert,
         )
 
         play_order_alert_sound()
         sidebar = getattr(self, "_ai_sidebar", None)
         if sidebar is not None:
             sidebar.focus_decision()
-        QMessageBox.information(
-            self,
-            "下单机会",
-            format_order_alert_message(decision_inner),
-        )
+        show_order_opportunity_alert(self, decision_inner)
         return True
 
     def _trigger_decision_flow_playback(self) -> None:

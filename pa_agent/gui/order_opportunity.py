@@ -62,6 +62,26 @@ def _windows_alert_wav_paths() -> list[str]:
     return [os.path.join(media, name) for name in names]
 
 
+ORDER_ALERT_AUTO_CLOSE_MS = 120_000
+
+
+def show_order_opportunity_alert(parent: Any, decision: dict[str, Any]) -> None:
+    """Modal alert that auto-closes after :data:`ORDER_ALERT_AUTO_CLOSE_MS`."""
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QMessageBox
+
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Information)
+    box.setWindowTitle("下单机会")
+    box.setText(format_order_alert_message(decision))
+    box.setStandardButtons(QMessageBox.StandardButton.Ok)
+    timer = QTimer(box)
+    timer.setSingleShot(True)
+    timer.timeout.connect(box.accept)
+    timer.start(ORDER_ALERT_AUTO_CLOSE_MS)
+    box.exec()
+
+
 def play_order_alert_sound() -> bool:
     """Play a short alert sound (best-effort). Returns True if playback was attempted."""
     if sys.platform == "win32":

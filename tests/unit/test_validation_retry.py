@@ -38,6 +38,47 @@ def test_detect_cheat_immutable_direction():
     assert any("direction" in f for f in flags)
 
 
+def test_detect_cheat_no_false_positive_when_program_normalizes_direction():
+    """Raw AI direction may differ from post-normalize value; compare normalized copies."""
+    from pa_agent.ai.json_validator import JsonValidator
+    from pa_agent.data.base import IndicatorBundle, KlineBar, KlineFrame
+
+    bars = tuple(
+        KlineBar(
+            seq=i + 1,
+            ts_open=float(1_000_000 - (i + 1) * 60_000),
+            open=2000.0,
+            high=2010.0,
+            low=1990.0,
+            close=2005.0,
+            volume=1.0,
+            closed=True,
+        )
+        for i in range(25)
+    )
+    frame = KlineFrame(
+        symbol="TEST",
+        timeframe="1h",
+        bars=bars,
+        snapshot_ts_local_ms=1,
+        indicators=IndicatorBundle(
+            ema20=tuple([2000.0] * 25),
+            atr14=tuple([10.0] * 25),
+        ),
+    )
+    validator = JsonValidator()
+    raw = {
+        "direction": "bearish",
+        "cycle_position": "broad_channel",
+        "gate_result": "proceed",
+        "gate_trace": [],
+    }
+    before_norm = validator.normalize_parsed("stage1", raw, kline_frame=frame)
+    after_norm = validator.normalize_parsed("stage1", dict(raw), kline_frame=frame)
+    flags = detect_cheat("stage1", before_norm, after_norm)
+    assert not flags
+
+
 def test_build_retry_feedback_contains_stage():
     err = _FakeErr("b", "missing", ["next_bar_prediction"], [], None, "{}")
     text = build_retry_feedback(err, stage="stage2", attempt=1, max_attempts=2)

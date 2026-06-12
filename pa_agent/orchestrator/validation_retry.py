@@ -52,7 +52,12 @@ def validate_with_retry(
 
         if isinstance(result, Ok):
             if attempt > 0 and previous_obj is not None:
-                cheats = detect_cheat(stage, previous_obj, result.obj)
+                before_norm = validator.normalize_parsed(
+                    stage,
+                    previous_obj,
+                    **validate_kwargs,
+                )
+                cheats = detect_cheat(stage, before_norm, result.obj)
                 if cheats:
                     logger.warning(
                         "%s retry cheat detected after attempt %d: %s",

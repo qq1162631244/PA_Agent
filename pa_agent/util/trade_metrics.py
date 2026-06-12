@@ -78,21 +78,17 @@ def format_estimated_win_rate_reasoning(decision: dict[str, Any]) -> str:
     return str(decision.get("estimated_win_rate_reasoning", "") or "").strip()
 
 
+# Lower cap: reward must be at least equal to risk (1:1) for any stance.
+MIN_RISK_REWARD_RATIO = 1.0
+
 # Upper cap: targets far beyond 1.5R usually imply unrealistically low win rates.
 MAX_RISK_REWARD_RATIO = 1.5
 
 
 def min_risk_reward_ratio(decision_stance: str | None = None) -> float:
-    """Minimum reward:risk ratio required to place an order for the given stance."""
-    from pa_agent.ai.decision_stance import normalize_stance
-
-    floors = {
-        "conservative": 1.5,
-        "balanced": 1.2,
-        "aggressive": 1.0,
-        "extreme_aggressive": 1.0,
-    }
-    return floors.get(normalize_stance(decision_stance), 1.5)
+    """Minimum reward:risk ratio required to place an order (same for all stances)."""
+    _ = decision_stance  # kept for call-site compatibility
+    return MIN_RISK_REWARD_RATIO
 
 
 def max_risk_reward_ratio() -> float:

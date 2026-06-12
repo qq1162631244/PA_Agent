@@ -41,6 +41,12 @@ def test_windows_alert_wav_paths_include_notify() -> None:
     assert any(p.endswith("notify.wav") for p in paths)
 
 
+def test_order_alert_auto_close_constant() -> None:
+    from pa_agent.gui.order_opportunity import ORDER_ALERT_AUTO_CLOSE_MS
+
+    assert ORDER_ALERT_AUTO_CLOSE_MS == 120_000
+
+
 def test_play_order_alert_sound_uses_wav_on_windows(monkeypatch) -> None:
     played: list[str] = []
 

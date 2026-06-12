@@ -1,0 +1,213 @@
+TOTAL JSON: 38
+WITH ORDER: 6 (15.8%)
+NO ORDER: 31
+MISSING stage2 decision: 1
+EXCEPTIONS in record: 1
+
+ORDER_TYPES: {'不下单': 31, '限价单': 6, None: 1}
+
+=== RECORDS WITH ORDER ===
+  2026-06-12_00-06-00_XAUUSDm_15m.json | 限价单 做空 | cycle=trading_range dir=neutral | 11.2:trade:交易区间-限价单-上边界做空刮头皮
+  2026-06-12_00-06-17_XAUUSDm_15m.json | 限价单 做多 | cycle=broad_channel dir=bullish | 11.2:trade:宽通道顺势回撤限价买进，EMA/支撑位挂单，K3低点止损
+  2026-06-12_09-06-00_XAUUSDm_15m.json | 限价单 做空 | cycle=broad_channel dir=neutral | 10.3:trade:宽通道限价做空方案，10.3方程通过，等待反弹至4195触发挂单
+  2026-06-12_10-06-00_XAUUSDm_15m.json | 限价单 做空 | cycle=broad_channel dir=neutral | 14:trade:宽通道顺势限价做空，方案逻辑完整通过§9-§14检查
+  2026-06-12_12-06-00_XAUUSDm_15m.json | 限价单 做空 | cycle=broad_channel dir=neutral | 10.3:trade:限价单做空(宽通道突破测试失败后的反向结构位)
+  2026-06-12_20-06-00_XAUUSDm_15m.json | 限价单 做空 | cycle=broad_channel dir=neutral | 11.2:trade:宽通道EMA附近做空限价单：宽通道允许双向，反弹至EMA(4206)限价做空，止损K2 high上方1tick，目标K1 low附近
+
+=== GATE S1 ===
+{'proceed': 37, None: 1}
+=== CYCLE ===
+{'broad_channel': 35, 'trading_range': 2, None: 1}
+=== DIRECTION ===
+{'neutral': 22, 'bearish': 11, 'bullish': 4, None: 1}
+
+=== TERMINAL NODE+OUTCOME (all records) ===
+   17  9.0:wait
+    6  10.3:reject
+    3  9.7:wait
+    3  11.2:trade
+    2  10.3:trade
+    1  6.3:wait
+    1  missing
+    1  14:trade
+    1  10.2:wait
+    1  10.1:wait
+    1  9.2:wait
+    1  14:wait
+
+=== TERMINAL NODE+OUTCOME (no-order only) ===
+   17  9.0:wait
+    6  10.3:reject
+    3  9.7:wait
+    1  6.3:wait
+    1  10.2:wait
+    1  10.1:wait
+    1  9.2:wait
+    1  14:wait
+
+=== TERMINAL LABEL KEYWORDS (no-order) ===
+   25  contains '等待'
+   13  contains '信号棒'
+   12  contains '通道'
+    8  contains 'K0'
+    7  contains '边界'
+    4  contains '交易者方程'
+    3  contains '回踩'
+    2  contains 'weak'
+    2  contains '止损'
+
+=== EACH NO-ORDER RECORD (terminal + reason head) ===
+FILE: 2026-06-11_18-06-00_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 9.0:wait:无合格入场信号棒，价格在宽通道中段，等待边界信号或K0触发
+  reason: 价格在宽通道中段（4086-4093），双向距边界均有距离：下边界4077约13点、上边界4118约28点。K1 other阳线站回EMA20但上影比0.398显示4093区域阻力有效，signal_bar.quality=invalid延续阶段一诊断，不构成合格信号棒。方向neutral、always_in=neutral，近期K10-K1内方向转换4次，不适合押注。无边界信号、无二次入场、无突
+
+FILE: 2026-06-11_18-06-01_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 9.0:wait:信号棒质量不足，等待K0收盘后重新评估
+  reason: 等待，不入场。阶段一诊断broad_channel方向中性，虽有K1 outside_bear跌破EMA20确认空头延续，但价格已逼近宽通道下边界4077支撑区（距当前仅约10点），追空盈亏比差；无可靠反转信号支持做多。detected_patterns包含failed_breakout/breakout_test（K4反弹测试EMA失败形成4091磁力位）和failed_signal（K5破位后
+
+FILE: 2026-06-11_18-06-36_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 9.0:wait:信号棒质量不足(K2 quality=weak)且K1无跟随，等待更清晰信号
+  reason: 阶段一诊断为宽通道(broad_channel)，方向中性。近期K7-K5形成微型空头尖峰，K2外包阳线大幅反弹至EMA附近构成突破测试(breakout_test模式已识别)，但K1十字星无跟随且收盘回落至K2收盘价水平，K1盘中虽突破K2高点(4091.91)但迅速被卖回至4091.45，显示EMA上方卖压明显。当前处于宽通道中段(〜4091)，既不在下边界(4077)也不在上边界(4110-
+
+FILE: 2026-06-11_19-06-00_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 9.0:wait:无合格信号棒，等待breakout_test完成或L2二次信号
+  reason: 当前处于宽通道breakout_test回测阶段，K1 trend_bull反弹站上EMA20但未突破K2高点4096.584。阶段一direction=neutral，无明确惯性方向（趋势棒空2多2均衡），Always In=neutral。信号棒K2 quality=weak（doji/inside），无跟随。宽通道核心策略为突破后不追、等二次信号（L2）。当前既无已收盘的可执行空头信号（K1
+
+FILE: 2026-06-11_19-06-01_XAUUSDm_15m.json
+  cycle=broad_channel direction=bearish
+  terminal: 9.0:wait:宽通道L1信号不构成有效入场，等待L2二次信号
+  reason: 宽通道空头背景，K1 outside_bear确认breakout_test回测完成，但K1为L1（初次做空信号）。宽通道交易策略明确禁止追L1，应等待L2二次信号。当前价格4084.694接近宽通道下边界4077，追空风险高且§14触犯（宽通道中追普通突破）。detected_patterns：breakout_test已完成、magnet位4077通道下边界、L1已识别。均衡档下§14明确触犯
+
+FILE: 2026-06-11_20-06-00_XAUUSDm_15m.json
+  cycle=broad_channel direction=bearish
+  terminal: 9.0:wait:信号棒质量不足，等待K0确认方向
+  reason: 宽通道下跌方向(broad_channel, bearish, AIS)下K1完成对原宽通道下边界4077的突破回踩测试，收盘4073.328维持空头结构。但K1为doji+长下影0.584+阳线收盘，信号质量中等，买盘积极抵抗使方向不明。detected_patterns含breakout_test(突破回踩测试完成但结果不明确)、gap_bar(第四根均线缺口棒)、magnet(4077磁力位
+
+FILE: 2026-06-11_21-06-00_XAUUSDm_15m.json
+  cycle=broad_channel direction=bearish
+  terminal: 10.3:reject:交易者方程不通过，突破单RR≈1.01<1.2底线，限价单方案因K1已穿位不合理，整体放弃入场
+  reason: 阶段二评估结论：不下单。核心原因--①宽通道空头结构中，K1 trend_bear确认下行恢复，但价格已运行至区间下部（距下边界4057约16点，约1.3ATR），追空空间非常有限；②宽通道中向下突破失败率约80%（下跌通道=多头旗形），当前K1 low=4071.919未跌破前低K2 low=4069.646，不是尖峰级别突破，追空风险高；③突破单方案：以K1为信号棒做空，entry=4071.
+
+FILE: 2026-06-11_21-06-21_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 9.0:wait:等待K0确认信号
+  reason: 当前处于下跌宽通道（broad_channel），AIS空头惯性确认，但K1为weak质量的outside_bull长下影阳线，形成对4067低点的假突破测试。信号棒质量不足（实体比仅0.073），且宽通道下轨附近追空需极强信号（连续阴线跌破4067），当前不具备。做多属逆势且无强反转确认。因此无可行入场方案，等待K0提供更清晰信号。
+
+FILE: 2026-06-11_21-06-51_XAUUSDm_15m.json
+  cycle=trading_range direction=bearish
+  terminal: 6.3:wait:区间中部不交易，等待价格到达边界
+  reason: 【均衡档】阶段二结论：不下单。核心原因：①阶段一诊断clearly为trading_range，当前价格4091处于区间中部（上边界4112约21点，下边界4077约14点），按§6.3规则'中间位置不交易'，区间中部不产生入场信号。②K1十字星无方向确认，K2信号棒已在2根K线后失效（follow_through=failed）。③限价单备选尝试：在接近上边界（4108附近）挂做空限价单，虽K1
+
+FILE: 2026-06-11_21-06-57_XAUUSDm_5m.json
+  cycle=broad_channel direction=neutral
+  terminal: 9.7:wait:K1入场棒弱无跟随，信号失效，等待二次入场或回撤确认
+  reason: 宽通道反弹接近前高阻力区，K1长上影显示卖压，AIS背景下做多需双确认（趋势线突破+极点测试失败），当前两者均未满足。K2信号棒虽佳但K1入场棒弱无跟随，不符合入场条件。交易倾向极度激进，但未找到满足交易者方程的方案，故选择观望。
+
+FILE: 2026-06-11_21-06-58_XAUUSDm_5m.json
+  cycle=broad_channel direction=neutral
+  terminal: 10.3:reject:AIS下跌宽通道限价做空方案通过全部检查
+  reason: 【极度激进档位驱动】AIS+下跌宽通道，顺势做空为默认方向。K1外包阴线创近期新低4068，空头延续信号明确。但当前价4072已处于低位反弹恐有限，限价单挂K1.high+1跳（4082.708）等待反弹至阻力位入场。止损在K6.high+1跳（4085.901），目标EMA20附近（4077.918），盈亏比1.5:1上限。阶段一detected_patterns中的always_in（AIS）
+
+FILE: 2026-06-12_10-06-01_XAUUSDm_15m.json
+  cycle=broad_channel direction=bearish
+  terminal: 10.3:reject:交易者方程未通过-不做
+  reason: 宽通道空头宽通道空头AIS方向明确，K1 inside阴线确认反弹在EMA(4195.11)受阻后空头恢复。信号棒K1质量medium（inside收敛，收盘位置0.264偏空），已通过§9.0检查。试图以K1 low下方1跳设突破空单(entry=4186.458)、止损K1 high+1跳(4194.528)。目标取K3/K5低点附近4179.000，回报7.458点，风险8.070点，盈亏比
+
+FILE: 2026-06-12_11-06-00_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 10.2:wait:止损过大-等待回踩确认
+  reason: 均衡档位+状态转换期(transition_risk=medium)综合评估：K1强多头H2突破，方向由中性转偏多，但当前位置（4203）处于宽通道中段（下边界4178，上边界4246），追多止损10.5点过大且无合适目标满足≤1.5R上限。宽通道规则不追突破、等突破回踩测试。限价做多方案经检查不可行（K1.low=4193.054已低于任何合理的EMA附近entry价，违反K1新鲜度规则）。做空
+
+FILE: 2026-06-12_11-06-01_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 9.0:wait:信号跟随失败，等待回踩确认
+  reason: K2强多头突破信号已被K1回落导致跟随失败。当前价格4199.44在宽通道中段，既非下边界支撑（4178）也非上边界阻力（4246）。K1尚未回踩至EMA(4195.31)或更低的支撑位，缺乏明确的限价单入场锚点。宽通道中段中间位置交易风险较高，应等待价格回到边界附近或出现更清晰结构后再决策。
+
+FILE: 2026-06-12_13-06-00_XAUUSDm_15m.json
+  cycle=broad_channel direction=bearish
+  terminal: 9.0:wait:信号棒质量不足（K2 weak已失效），等待反弹至4189-4192阻力区出现空头信号棒再评估
+  reason: 均衡档位评估：宽通道（broad_channel）空头背景，K1跌破原下边界4178至4172后长下影反弹收4180，构成典型突破测试。阶段一signal_bar=K2(inside,weak)已失效，K1为other类型（非标准信号棒、下影比0.514、实体0.435），无已收盘合格信号棒。限价做空方案试算：entry=4189.000（K2 high下方），stop若取合理位置K5 high=
+
+FILE: 2026-06-12_14-06-00_XAUUSDm_15m.json
+  cycle=broad_channel direction=bearish
+  terminal: 9.0:wait:宽通道假突破后中间位置等待，无入场信号棒
+  reason: 均衡档位下依次评估三种可能方向：①做空需等待反弹至EMA(4189.5)或4195上边界出现空头拒绝信号棒，当前无信号；②做多需等待回撤至4173下边界附近出现多头信号棒，K1刚完成强反弹位置不合适；③当前价格4183处于宽通道中间位置(4173-4200)，stage1 risk_warning明确提示中间不交易。detected_patterns中breakout_failure(假突破)和t
+
+FILE: 2026-06-12_14-06-01_XAUUSDm_15m.json
+  cycle=broad_channel direction=bearish
+  terminal: 9.0:wait:信号棒K1质量medium不足在宽通道下边界双重测试+transition_risk=high区域执行入场，等待方向确认（有效跌破前低4170.758或出现强反转棒双底结构）。
+  reason: 阶段二均衡档位下整体判定为不下单（wait）。宽通道周期(broad_channel)过渡状态(transition_risk=high)，K1(other阴线实体比0.558)跌破4178-4183凝滞区但未有效跌破前低4170.758（最低仅4172.268），下影比0.396显示买盘从通道下边界承接回升至4176.355收盘。detected_patterns--breakout_test（
+
+FILE: 2026-06-12_15-06-00_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 9.0:wait:方向冲突期+信号链不完整，等待K0确认方向后再评估
+  reason: 【均衡档位裁定】宽通道下跌空头背景下，K1 outside_bull在下边界三重底假突破反弹，方向从bearish转neutral。入场层面：做多方向与AIS冲突（阶段一闸门2.4=AIS），且#14禁止在AIS中做首个做多反转信号；做空方向虽与AIS一致，但K1大阳反弹无空头信号棒，缺乏做空入场锚点。限价单评估：做空限价在EMA20(4185)附近entry=4185.5、stop=4192、t
+
+FILE: 2026-06-12_15-06-01_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 9.0:wait:宽通道下边界附近方向中性，K1 trend_bear空头做空位置不利(距支撑~4点)，做多无信号。等待下边界方向选择：①真跌破4174后等待突破回踩做空；②边界反转信号后做多；③反弹至EMA附近出现空头信号棒做空
+  reason: 决定不下单等待。核心逻辑：①cycle_position=broad_channel且direction=neutral，宽通道下边界附近方向未定；②K1 trend_bear空头方向清晰但下边界三重底(4170→4172→4174)仅距~4点，做空位置极差，止损可设于K1高4185.031(风险8.98点)但做空距支撑仅2-3点，胜率极低；③做多无任何正向信号(K1 trend_bear收盘弱)
+
+FILE: 2026-06-12_16-06-00_XAUUSDm_15m.json
+  cycle=broad_channel direction=bullish
+  terminal: 10.1:wait:宽通道上段无法构建合理止损方案,等待K0出空头信号棒或价格回撤至通道中线后再评估
+  reason: 【档位均衡】尝试了宽通道顺势回撤做多限价方案（entry≈4195、止损锚点问题）和逆势做空方案（无空头信号棒且触犯AIL反向禁止项），均不可行。detected_patterns: breakout_pullback已充分反弹计价，magnet(4246)为上方磁力位但动能衰减限制了追多可行性，failed_signal/trapped_traders为空头被套支撑位但价格已在通道上段68%分位
+
+FILE: 2026-06-12_16-06-01_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 9.2:wait:方向中性导致无入场方案，等待边界信号
+  reason: 均衡档位裁定：方向neutral，宽通道中上段(4205)无边界支撑/阻力信号。尝试做多限价(回撤EMA~4187)但目标受4205-4210阻力限制，盈亏比约0.83:1低于均衡档底线1.2:1且胜率约50-55%期望值为负；做空限价(4205附近)止损无法合理放置。突破单同样不可行--做多在宽通道中上段追多空间有限(距上边界仅41点)，做空逆强势反弹。阶段一detected_patterns(
+
+FILE: 2026-06-12_17-06-00_XAUUSDm_15m.json
+  cycle=broad_channel direction=bullish
+  terminal: 10.3:reject:宽通道追突破触犯禁止项，方案否决
+  reason: 宽通道bullish方向明确，AIL持续(bull_gap=7)，但K1趋势棒与前棒重叠度高达0.855（极重叠），收盘4225.415未有效站稳前高4227.914，增量仅8.59点--突破力度不足，属微幅上探而非确认突破。宽通道交易规则明确：不追突破，等回撤至EMA或支撑结构位再顺势入场。通道当前64%分位，追突破将面临前高+通道上边界双重阻力。尝试突破单(entry=K1 high+0.00
+
+FILE: 2026-06-12_17-06-01_XAUUSDm_15m.json
+  cycle=broad_channel direction=bullish
+  terminal: 9.0:wait:无合格信号棒，等待K0收盘后重新评估
+  reason: 宽通道bullish背景但K1 trend_bear突破4225失败收近低点，短期多头上行动能衰减。K2 inside gap up后无跟随属breakout_failure模式。阶段一detected_patterns中failed_signal(K2突破失败)+trapped_traders(K1高点套住追多者)+breakout_failure(K1突破失败)均不支持立即入场。AIL虽未逆转
+
+FILE: 2026-06-12_18-06-00_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 9.0:wait:宽通道底部无与策略兼容的入场信号，等待反弹测试
+  reason: 均衡档位下评估：市场处于宽通道(4246-4170)底部区域，K1强空头突破MDB(4219)至EMA(4206)。做空方向虽K1是L1强信号棒质量高，但宽通道下边界追突破属§14禁止项（第12条：在宽通道中追突破），且AIL方向与做空冲突，做反向信号需双确认当前不满足。做多方向无任何看涨信号棒。均衡档虽允许次优setup，但§14硬禁止优先于均衡倾向，不可因均衡档位绕过禁止项。transitio
+
+FILE: 2026-06-12_18-06-01_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 9.0:wait:信号棒质量不足，等待更清晰信号再评估入场方案
+  reason: 均衡倾向下评估：当前行情处于宽通道(4246-4170)内部反弹测试阶段。K1阳线从EMA(4207)反弹至MDB区域(4219-4222)，但K1是inside bar(被K2包含)、量能萎缩(3235 vs K2的6032)、上影27.2%有抛压，未突破K2高点(4222)。信号棒质量weak，无成熟入场方案。宽通道策略可双向交易但须在边界附近，当前价格4215在通道中部偏下，非边界理想位置。
+
+FILE: 2026-06-12_19-06-00_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 10.3:reject:交易者方程不通过，放弃入场
+  reason: 【均衡档位评估】当前宽通道(4246-4170)框架完整，K3空头跌破MDB→K2阳线反弹测试MDB失败→K1阴线回落确认，空头突破回踩(breakout_pullback)结构已完成。detected_patterns中的breakout_pullback和breakout_test均已确认空头方向有效，但AIL背景(7/8根K线在EMA上方)仍在，做空受惯性制约。K1-K2形成ii模式(收缩方
+
+FILE: 2026-06-12_19-06-01_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 9.7:wait:入场棒未触发且无跟随，方向中性+MDT阻力近，放弃入场等待二次确认
+  reason: 均衡档位下评估后决定不下单。核心理由：(1)阶段一 direction=neutral，市场处于空头波段结束到多头反弹初期的方向转换期，无明确方向偏好；(2)MDT阻力(4210.357)距K1收盘仅约0.7点，做多上方空间极有限，盈亏比远低于1.2:1底线；(3)做空与弱AIL方向冲突，且空头波段已被K1反转打破，逆势胜率低；(4)宽通道框架下虽允许双向，但转换期transition_risk=
+
+FILE: 2026-06-12_21-06-00_XAUUSDm_15m.json
+  cycle=broad_channel direction=bearish
+  terminal: 14:wait:宽通道下边界触发禁止项，等待反弹后的顺势信号或边界反转二次确认
+  reason: 宽通道空头腿延续（LL+LH结构），K1 outside_bear 2.219ATR跌破前低宣告反弹终结，空头重新主导，AIS状态明确。方向判断为空头，但面临硬约束：①价格距宽通道下边界4170仅12点（K1 low=4182.658），追空空间极为有限；②突破单方案以K1 low-0.001=4182.657为entry、K1 high+0.001=4210.168为止损，风险27.511点，最
+
+FILE: 2026-06-12_21-06-01_XAUUSDm_15m.json
+  cycle=broad_channel direction=neutral
+  terminal: 10.3:reject:宽通道下边界反弹做多突破单通过交易者方程
+  reason: 均衡档位。宽通道下边界反弹获K2 outside_bull+K1跳空高开2根确认，bear_gap消失(3→0)确认空头衰竭。K1收盘略低于EMA(4204.07)，突破在即。做多突破单基于K1高点(4206.804)上方1跳动，目标1.5R=4221.471(通道中线区域)，止损K1低点(4197.029)下方。transition_risk=medium建议75%仓位。detected_pat
+
+FILE: 2026-06-12_22-06-00_XAUUSDm_15m.json
+  cycle=broad_channel direction=bearish
+  terminal: 9.7:wait:宽通道下行至底部区域，等待反弹至阻力位再做空
+  reason: 不下单理由：1）阶段一diagnosis_confidence=60（broad_channel与trending_tr重叠歧义），direction=bearish、AIS方向明确，但价格已运行至宽通道下边界附近(K1 low=4182.5)，距通道下边界(4170)仅约12点，追空违反下跌通道=多头旗形的核心认知--宽通道下边界是支撑区而非追空区。2）阶段一detected_patterns中
+
+FILE: 2026-06-12_22-06-01_XAUUSDm_15m.json
+  cycle=broad_channel direction=bearish
+  terminal: 9.0:wait:信号棒质量不足，等待K0方向确认
+  reason: 阶段二决策：不下单。  【市场状态】宽通道空头腿接近完成，K1 inside(0.866ATR)内包于K2 outside_bear(2.219ATR)，波动率从2.219ATR骤降至0.866ATR。价格在4183-4193窄幅整理，距宽通道下边界(4170)仅13点，距EMA20(4201)约15点。AIS延续但空头动能显著衰减。  【周期定位】broad_channel transition

@@ -23,8 +23,10 @@ def test_compute_risk_reward_short():
     assert rr["reward"] == 31
 
 
-def test_rr_bounds_default_stance() -> None:
-    assert min_risk_reward_ratio("conservative") == max_risk_reward_ratio()
+def test_rr_bounds_all_stances_share_one_floor() -> None:
+    for stance in ("conservative", "balanced", "aggressive", "extreme_aggressive", None):
+        assert min_risk_reward_ratio(stance) == 1.0
+    assert max_risk_reward_ratio() == 1.5
 
 
 def test_format_estimated_win_rate_from_model_field():

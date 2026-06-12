@@ -337,6 +337,41 @@ class JsonValidator:
             "stage2": STAGE2_SCHEMA,
         }
 
+    def normalize_parsed(
+        self,
+        stage: Literal["stage1", "stage2"],
+        obj: dict[str, Any],
+        *,
+        decision_stance: str | None = None,
+        kline_frame: Any = None,
+        stage1_json: dict[str, Any] | None = None,
+        incremental_new_bar_count: int = 0,
+        incremental_previous_stage1: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Apply the same post-parse normalization as :meth:`validate`."""
+        norm_mode = getattr(self._validation, "normalization_mode", "strict")
+        if stage == "stage1":
+            from pa_agent.ai.stage1_normalizer import normalize_stage1
+
+            return normalize_stage1(
+                obj,
+                normalization_mode=norm_mode,
+                kline_frame=kline_frame,
+                incremental_new_bar_count=int(incremental_new_bar_count or 0),
+                incremental_previous_stage1=incremental_previous_stage1
+                if incremental_new_bar_count > 0
+                else None,
+            )
+        from pa_agent.ai.stage2_normalizer import normalize_stage2
+
+        return normalize_stage2(
+            obj,
+            normalization_mode=norm_mode,
+            kline_frame=kline_frame,
+            decision_stance=decision_stance,
+            stage1_json=stage1_json,
+        )
+
     def validate(
         self,
         stage: Literal["stage1", "stage2"],
@@ -407,29 +442,16 @@ class JsonValidator:
                 message="Top-level JSON value is not an object",
             )
 
+        obj = self.normalize_parsed(
+            stage,
+            obj,
+            decision_stance=decision_stance,
+            kline_frame=kline_frame,
+            stage1_json=stage1_json,
+            incremental_new_bar_count=incremental_new_bar_count,
+            incremental_previous_stage1=incremental_previous_stage1,
+        )
         norm_mode = getattr(self._validation, "normalization_mode", "strict")
-        if stage == "stage1":
-            from pa_agent.ai.stage1_normalizer import normalize_stage1
-
-            obj = normalize_stage1(
-                obj,
-                normalization_mode=norm_mode,
-                kline_frame=kline_frame,
-                incremental_new_bar_count=int(incremental_new_bar_count or 0),
-                incremental_previous_stage1=incremental_previous_stage1
-                if incremental_new_bar_count > 0
-                else None,
-            )
-        elif stage == "stage2":
-            from pa_agent.ai.stage2_normalizer import normalize_stage2
-
-            obj = normalize_stage2(
-                obj,
-                normalization_mode=norm_mode,
-                kline_frame=kline_frame,
-                decision_stance=decision_stance,
-                stage1_json=stage1_json,
-            )
 
         # ── Schema validation (b and c) ───────────────────────────────────────
         try:
